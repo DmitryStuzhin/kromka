@@ -42,7 +42,8 @@ test('season fixture history uses July-to-next-month range, 100-item pages, and 
   assert.match(server, /const pageSize = 100/);
   assert.match(server, /offset: String\(offset\)/);
   assert.match(server, /for \(let page = 0; page < 12; page \+= 1\)/);
-  assert.match(server, /fixtureHistoryComplete: history\.complete/);
+  assert.match(server, /fixtureHistoryComplete: goalData\.history\.complete/);
+  assert.match(server, /fixtureHistoryComplete: flashscore\.fixtureHistoryComplete/);
   assert.match(goal, /payload\.fixtureHistoryComplete !== false/);
 });
 
@@ -52,7 +53,8 @@ test('match insight endpoints accept only fixtures loaded from the RPL calendar 
   assert.match(server, /const fixture = knownFixtures\.get\(fixtureId\)/);
   assert.match(server, /if \(!fixture\) return send\(res, 404, \{ error: 'Unknown RPL fixture' \}\)/);
   assert.match(server, /const ttl = finished \? 24 \* 60 \* 60_000 : live \? 60_000 : 10 \* 60_000/);
-  assert.match(server, /goalGet\(`\/fixtures\/\$\{encodeURIComponent\(fixtureId\)\}\/\$\{resource\}`, ttl\)/);
+  assert.match(server, /goalMatchDataFor\(fixtureId, fixture, resource, ttl\)/);
+  assert.match(server, /goalGet\(`\/fixtures\/\$\{encodeURIComponent\(goalId\)\}\/\$\{resource\}`, ttl\)/);
   assert.match(html, /assets\/goal-insights\.js/);
   assert.match(worker, /assets\/goal-insights\.js/);
 });

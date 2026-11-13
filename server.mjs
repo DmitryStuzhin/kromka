@@ -1,16 +1,22 @@
 import http from 'node:http';
+import { spawn } from 'node:child_process';
 import { createHash } from 'node:crypto';
 import { mkdir, readFile, rename, stat, writeFile } from 'node:fs/promises';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
+import { FLASH_TEAM_BY_GOAL_ID, flashscoreMatchEvents, flashscoreMatchLineups, flashscoreMatchStatistics, flashscoreRoster, flashscoreRosterById, flashscoreSeasonPayload } from './flashscore-adapter.mjs';
 
 const ROOT = path.dirname(fileURLToPath(import.meta.url));
 const PORT = Number(process.env.PORT || 4173);
 const GOAL_API_KEY = process.env.GOAL_API_KEY || '';
 const API_FOOTBALL_API_KEY = process.env.API_FOOTBALL_API_KEY || '';
 const LEAGUE_ID = process.env.GOAL_RPL_LEAGUE_ID || 'cmr77dvua00a4rx061d2jre7p';
-const API_BASE = 'https://api.goal-api.com/v1';
+const API_BASE = process.env.GOAL_API_BASE || 'https://api.goal-api.com/v1';
 const API_FOOTBALL_BASE = 'https://v3.football.api-sports.io';
+const FLASHSCORE_ENABLED = process.env.RPL_FLASHSCORE_ENABLED !== 'false';
+const FLASHSCORE_PROXY_URL = (process.env.RPL_FLASHSCORE_PROXY_URL || 'http://127.0.0.1:8765').replace(/\/+$/, '');
+const FLASHSCORE_PROXY_AUTOSTART = process.env.RPL_FLASHSCORE_AUTOSTART !== 'false';
+const FLASHSCORE_PROXY_PORT = Number(new URL(FLASHSCORE_PROXY_URL).port || 8765);
 const SQUAD_CACHE_TTL = 7 * 24 * 60 * 60_000;
 const PORTRAIT_CHECK_TTL = 7 * 24 * 60 * 60_000;
 const API_FOOTBALL_DAILY_GUARD = 80;
@@ -46,6 +52,8 @@ let persistentCache = { version: 1, teams: {}, portraitChecks: {}, dailyRequests
 let persistentCacheLoad;
 let persistentCacheWrite = Promise.resolve();
 const liveStreamClients = new Set();
+let flashscoreProxyProcess = null;
+let flashscoreSquadsCache = { at: 0, players: [] };
 let goalLiveSocket = null;
 let goalLiveFixtureIds = [];
 let goalLiveFixtureKey = '';
@@ -116,6 +124,57 @@ async function goalGet(endpoint, ttl) {
   if (!response.ok) { const error = new Error(`GOAL API returned ${response.status}`); error.status = response.status; throw error; }
   const value = await response.json(); cache.set(endpoint, { at: Date.now(), value }); return value;
 }
+async function flashscoreGet(endpoint) {
+  if (!FLASHSCORE_ENABLED) throw new Error('Flashscore proxy is disabled');
+  const response = await fetch(`${FLASHSCORE_PROXY_URL}${endpoint}`, { headers: { Accept: 'application/json' }, signal: AbortSignal.timeout(30_000) });
+  if (!response.ok) throw new Error(`Flashscore proxy returned ${response.status}`);
+  return response.json();
+}
+async function flashscoreSquadPlayers() {
+  if (flashscoreSquadsCache.players.length && Date.now() - flashscoreSquadsCache.at < 6 * 60 * 60_000) return flashscoreSquadsCache.players;
+  const payload = await flashscoreGet('/api/squads');
+  if (!Array.isArray(payload?.players)) throw new Error('Flashscore proxy returned an invalid squads payload');
+  flashscoreSquadsCache = { at: Date.now(), players: payload.players };
+  return flashscoreSquadsCache.players;
+}
+function dateKeyOf(value) {
+  const raw = String(value ?? '');
+  const direct = raw.match(/^\d{4}-\d{2}-\d{2}/)?.[0];
+  if (direct) return direct;
+  const date = new Date(raw);
+  if (Number.isNaN(date.getTime())) return '';
+  const parts = Object.fromEntries(new Intl.DateTimeFormat('en-CA', { timeZone: 'Europe/Moscow', year: 'numeric', month: '2-digit', day: '2-digit' }).formatToParts(date).map((part) => [part.type, part.value]));
+  return `${parts.year}-${parts.month}-${parts.day}`;
+}
+function teamIdsOfFixture(item) {
+  return {
+    home: String(item?.homeTeamId || item?.home_team_id || teamIdOf(item?.homeTeam || item?.home_team || item?.teams?.home) || ''),
+    away: String(item?.awayTeamId || item?.away_team_id || teamIdOf(item?.awayTeam || item?.away_team || item?.teams?.away) || '')
+  };
+}
+function attachGoalFixtureIds(flashFixtures, goalFixtures) {
+  const rows = fixtureRowsOf(goalFixtures);
+  for (const fixture of flashFixtures) {
+    const candidates = rows.filter((goal) => {
+      const teams = teamIdsOfFixture(goal);
+      if (teams.home !== fixture.homeTeamId || teams.away !== fixture.awayTeamId) return false;
+      const goalDay = dateKeyOf(goal.kickoffUtc || goal.kickoff_utc || goal.matchDate || goal.kickoff || goal.date || '');
+      return !goalDay || !fixture.kickoffUtc || Math.abs(Date.parse(`${goalDay}T12:00:00Z`) - Date.parse(`${fixture.kickoffUtc.slice(0, 10)}T12:00:00Z`)) <= 86_400_000;
+    });
+    if (candidates.length === 1) fixture.goalFixtureId = String(candidates[0].id || candidates[0].fixtureId || '');
+  }
+}
+function startFlashscoreProxy() {
+  if (!FLASHSCORE_ENABLED || !FLASHSCORE_PROXY_AUTOSTART || flashscoreProxyProcess) return;
+  let parsed;
+  try { parsed = new URL(FLASHSCORE_PROXY_URL); } catch { return; }
+  if (!['127.0.0.1', 'localhost', '[::1]', '::1'].includes(parsed.hostname)) return;
+  flashscoreProxyProcess = spawn(process.env.PYTHON || 'python3', [path.join(ROOT, 'flashscore_proxy.py'), '--host', '127.0.0.1', '--port', String(FLASHSCORE_PROXY_PORT)], { stdio: 'ignore' });
+  flashscoreProxyProcess.on('error', (error) => console.warn('Flashscore proxy could not be started:', error.message));
+  flashscoreProxyProcess.on('exit', (code) => { if (code && code !== 0) console.warn(`Flashscore proxy stopped with code ${code}`); });
+}
+function stopFlashscoreProxy() { if (flashscoreProxyProcess && flashscoreProxyProcess.exitCode === null) flashscoreProxyProcess.kill('SIGTERM'); }
+process.once('exit', stopFlashscoreProxy);
 function goalStatusCategory(value) {
   if (value && typeof value === 'object') value = [value.state, value.status, value.name, value.short, value.code, value.description, value.type?.name, value.type?.state].filter(Boolean).join(' ');
   const status = String(value ?? '').toUpperCase().replace(/[\s_-]+/g, ' ');
@@ -150,11 +209,14 @@ function applyGoalSocketMessage(message) {
   const minute = goalClockMinute(data);
   const status = goalStatusCategory(data.status ?? data.matchStatus ?? data.match_status ?? data.fixtureStatus ?? data.state);
   if (homeScore === null && awayScore === null && !minute && !status) return;
+  const flashscoreEntry = [...knownFixtures.entries()].find(([, fixture]) => fixture.provider === 'Flashscore' && fixture.goalFixtureId === id);
+  const displayFixtureId = flashscoreEntry?.[0] || id;
   if (status) {
     const fixture = knownFixtures.get(id);
     knownFixtures.set(id, { ...fixture, status: status === 'finished' ? 'FINISHED' : 'LIVE' });
+    if (flashscoreEntry) knownFixtures.set(displayFixtureId, { ...flashscoreEntry[1], status: status === 'finished' ? 'FINISHED' : 'LIVE' });
   }
-  emitLiveStream('fixture', { fixtureId: id, provider: 'GOAL API', transport: 'WebSocket', homeScore, awayScore, minute, status, receivedAt: new Date().toISOString() });
+  emitLiveStream('fixture', { fixtureId: displayFixtureId, provider: 'GOAL API', transport: 'WebSocket', homeScore, awayScore, minute, status, receivedAt: new Date().toISOString() });
 }
 function scheduleGoalSocketRetry(generation) {
   if (generation !== goalLiveGeneration || !goalLiveFixtureIds.length || goalLiveRetryTimer) return;
@@ -250,7 +312,14 @@ function rememberFixtures(payload) {
     const id = String(item?.id || item?.fixtureId || '');
     const homeTeamId = String(item?.homeTeamId || item?.home_team_id || teamIdOf(item?.homeTeam || item?.home_team || item?.teams?.home) || '');
     const awayTeamId = String(item?.awayTeamId || item?.away_team_id || teamIdOf(item?.awayTeam || item?.away_team || item?.teams?.away) || '');
-    if (id) knownFixtures.set(id, { status: String(item.matchStatus || item.status || '').toUpperCase(), homeTeamId, awayTeamId });
+    if (id) knownFixtures.set(id, {
+      status: String(item.matchStatus || item.status || '').toUpperCase(), homeTeamId, awayTeamId,
+      provider: item.provider || payload?.provider || 'GOAL API',
+      flashscoreMatchId: String(item.flashscoreMatchId || ''),
+      flashscoreHomeCode: String(item.flashscoreHomeCode || ''), flashscoreAwayCode: String(item.flashscoreAwayCode || ''),
+      kickoffUtc: String(item.kickoffUtc || item.kickoff_utc || item.matchDate || item.date || ''),
+      goalFixtureId: String(item.goalFixtureId || '')
+    });
     for (const teamId of [homeTeamId, awayTeamId]) if (teamId) knownTeams.add(teamId);
   }
 }
@@ -283,6 +352,8 @@ function goalPortraitOf(player) {
   for (const value of [player?.image, player?.playerImage, player?.photo, player?.avatar]) {
     const url = approvedUrl(value, 'media.goal-api.com');
     if (url) return url;
+    const flashscore = approvedUrl(value, 'static.flashscore.com');
+    if (flashscore && /^\/res\/image\/data\/[A-Za-z0-9._-]+$/.test(new URL(flashscore).pathname)) return flashscore;
   }
   return '';
 }
@@ -437,6 +508,50 @@ async function enrichRoster(teamId, payload) {
   });
   return { payload: { ...payload, data: enrichedRows }, meta: { ...baseMeta, ...stats } };
 }
+function mergeFlashscoreRosterWithGoal(flashscorePayload, goalPayload) {
+  const flashRows = Array.isArray(flashscorePayload?.data) ? flashscorePayload.data : [];
+  const goalRows = Array.isArray(goalPayload?.data) ? goalPayload.data : [];
+  const keyOf = (value) => nameTokens(value).sort().join(' ');
+  const flashNames = new Set(flashRows.map((player) => keyOf(player?.name)).filter(Boolean));
+  const data = flashRows.map((player) => {
+    const key = keyOf(player?.name);
+    if (!key) return player;
+    const matches = goalRows.filter((candidate) => keyOf(candidate?.name || candidate?.lineupPlayer || candidate?.displayName) === key &&
+      (!player.number || !candidate.number || String(player.number) === String(candidate.number)));
+    if (matches.length !== 1) return player;
+    const goal = matches[0];
+    const image = goalPortraitOf(goal);
+    return {
+      ...player,
+      number: player.number || goal.number || '',
+      age: player.age ?? goal.age ?? null,
+      type: player.type || goal.type || goal.position || '',
+      playerPosition: player.playerPosition || goal.playerPosition || goal.position || '',
+      image: player.image || image,
+      portraitSource: player.image ? 'Flashscore' : image ? 'GOAL API' : player.portraitSource
+    };
+  });
+  const supplementalNames = new Set();
+  for (const goal of goalRows) {
+    const name = String(goal?.name || goal?.lineupPlayer || goal?.displayName || '').trim();
+    const key = keyOf(name);
+    if (!key || flashNames.has(key) || supplementalNames.has(key)) continue;
+    supplementalNames.add(key);
+    const image = goalPortraitOf(goal);
+    const supplemental = {
+      ...goal,
+      id: String(goal.id || goal.playerId || goal.player_id || `goal-${key.replace(/[^a-z0-9]+/gi, '-')}`),
+      name,
+      number: goal.number ?? goal.shirtNumber ?? '',
+      age: goal.age ?? null,
+      type: goal.type || goal.position || '',
+      playerPosition: goal.playerPosition || goal.position || ''
+    };
+    if (image) { supplemental.image = image; supplemental.portraitSource = 'GOAL API'; }
+    data.push(supplemental);
+  }
+  return { ...flashscorePayload, data, supplementalProvider: goalRows.length ? 'GOAL API' : '' };
+}
 function lineupArrayKey(key) { return /starting|starter|substitut|bench/i.test(String(key || '')); }
 function collectLineupPlayers(value, insideLineup = false, output = [], seen = new Set()) {
   if (Array.isArray(value)) { for (const child of value) collectLineupPlayers(child, insideLineup, output, seen); return output; }
@@ -513,11 +628,58 @@ async function seasonFixtureHistory(season, to) {
   return { rows: pages, complete, from, to };
 }
 
+async function goalFixtureIdFor(fixtureId, fixture) {
+  if (fixture?.provider !== 'Flashscore') return fixtureId;
+  if (fixture.goalFixtureId) return fixture.goalFixtureId;
+  if (!GOAL_API_KEY) return '';
+  const day = dateKeyOf(fixture.kickoffUtc);
+  if (!day) return '';
+  const query = new URLSearchParams({ leagueId: LEAGUE_ID, from: shiftDay(day, -1), to: shiftDay(day, 1), limit: '100', offset: '0' }).toString();
+  const payload = await goalGet(`/fixtures?${query}`, 5 * 60_000);
+  const rows = fixtureRowsOf(payload).filter((row) => {
+    const teams = teamIdsOfFixture(row);
+    return teams.home === fixture.homeTeamId && teams.away === fixture.awayTeamId;
+  });
+  if (rows.length !== 1) return '';
+  fixture.goalFixtureId = String(rows[0].id || rows[0].fixtureId || '');
+  knownFixtures.set(fixtureId, fixture);
+  return fixture.goalFixtureId;
+}
+
+async function goalLineupsFor(fixtureId, fixture) {
+  if (!GOAL_API_KEY) return null;
+  const goalId = await goalFixtureIdFor(fixtureId, fixture);
+  if (!goalId) return null;
+  const finished = /FINISHED|COMPLETE|ENDED|FT/.test(fixture.status);
+  const payload = await goalGet(`/fixtures/${encodeURIComponent(goalId)}/lineups`, finished ? 24 * 60 * 60_000 : 10 * 60_000);
+  const enriched = await enrichLineups(payload, fixture);
+  return { ...enriched.payload, portraitFallback: enriched.meta, provider: 'GOAL API' };
+}
+
+async function goalMatchDataFor(fixtureId, fixture, resource, ttl) {
+  if (!GOAL_API_KEY) return null;
+  const goalId = await goalFixtureIdFor(fixtureId, fixture);
+  if (!goalId) return null;
+  return goalGet(`/fixtures/${encodeURIComponent(goalId)}/${resource}`, ttl);
+}
+function sourcedPayload(payload, provider) {
+  if (Array.isArray(payload)) return { data: payload, provider };
+  if (payload && typeof payload === 'object') return { ...payload, provider: payload.provider || provider };
+  return { data: payload, provider };
+}
+
+function rosterMapForFixture(players, fixture) {
+  const home = flashscoreRosterById(players, fixture.flashscoreHomeCode);
+  const away = flashscoreRosterById(players, fixture.flashscoreAwayCode);
+  return new Map([...home, ...away]);
+}
+
 const server = http.createServer(async (req, res) => {
   const url = new URL(req.url || '/', `http://${req.headers.host || 'localhost'}`);
   if (req.method !== 'GET') return send(res, 405, { error: 'Method not allowed' });
   if (url.pathname === '/api/status') return send(res, 200, {
-    configured: Boolean(GOAL_API_KEY), provider: 'GOAL API', leagueId: LEAGUE_ID,
+    configured: Boolean(FLASHSCORE_ENABLED || GOAL_API_KEY), provider: FLASHSCORE_ENABLED ? 'Flashscore' : 'GOAL API',
+    fallbackProvider: GOAL_API_KEY ? 'GOAL API' : '', goalApiConfigured: Boolean(GOAL_API_KEY), flashscoreProxyEnabled: FLASHSCORE_ENABLED, leagueId: LEAGUE_ID,
     season: process.env.GOAL_RPL_SEASON || '2026',
     portraitFallbackConfigured: Boolean(API_FOOTBALL_API_KEY), portraitFallbackProvider: 'API-Football'
   });
@@ -531,36 +693,69 @@ const server = http.createServer(async (req, res) => {
     return;
   }
   if (url.pathname === '/api/rpl') {
-    if (!GOAL_API_KEY) return send(res, 503, { error: 'GOAL_API_KEY is not configured' });
     const season = url.searchParams.get('season') || process.env.GOAL_RPL_SEASON || '2026';
     if (!/^20\d{2}$/.test(season)) return send(res, 400, { error: 'Season must be a four-digit year' });
     const today = moscowDay();
-    const from = `${season}-07-01`;
     const to = shiftDay(today, 30);
-    try {
-      const [history, standings] = await Promise.all([
+    const flashscorePromise = FLASHSCORE_ENABLED
+      ? flashscoreGet('/api/season').then((payload) => flashscoreSeasonPayload(payload, season)).catch((error) => { console.warn('Flashscore data unavailable:', error.message); return null; })
+      : Promise.resolve(null);
+    const goalPromise = GOAL_API_KEY
+      ? Promise.all([
         seasonFixtureHistory(season, to),
         goalGet(`/leagues/${encodeURIComponent(LEAGUE_ID)}/standings?season=${encodeURIComponent(season)}`, 15 * 60_000)
-      ]);
-      const fixtures = { data: history.rows };
-      rememberFixtures(fixtures);
+      ]).then(([history, standings]) => ({ history, standings })).catch((error) => { console.warn('GOAL API supplemental data unavailable:', error.message); return null; })
+      : Promise.resolve(null);
+    const [flashscore, goalData] = await Promise.all([flashscorePromise, goalPromise]);
+    if (flashscore) {
+      const fixtures = flashscore.fixtures;
+      const standings = goalData?.standings || flashscore.standings;
+      if (goalData) {
+        attachGoalFixtureIds(fixtures.data, goalData.history.rows);
+        rememberFixtures({ data: goalData.history.rows, provider: 'GOAL API' });
+        syncGoalLiveSocket(goalData.history.rows);
+      } else syncGoalLiveSocket([]);
+      rememberFixtures({ ...fixtures, provider: 'Flashscore' });
       rememberStandingsTeams(standings);
-      syncGoalLiveSocket(history.rows);
-      return send(res, 200, { fixtures, standings, provider: 'GOAL API', leagueId: LEAGUE_ID, season, range: { from: history.from, to: history.to }, fixtureHistoryComplete: history.complete, fetchedAt: new Date().toISOString() });
-    } catch (error) {
-      console.error('GOAL API request failed:', error.message);
-      return send(res, 502, { error: 'Не удалось загрузить данные GOAL API', status: error.status || 502 });
+      return send(res, 200, {
+        ...flashscore, fixtures, standings, provider: 'Flashscore',
+        standingsProvider: goalData ? 'GOAL API' : 'Flashscore', supplementalProvider: goalData ? 'GOAL API' : '',
+        leagueId: LEAGUE_ID, range: { from: `${season}-07-01`, to },
+        fixtureHistoryComplete: flashscore.fixtureHistoryComplete,
+        fetchedAt: new Date().toISOString()
+      });
     }
+    if (!goalData) return send(res, 502, { error: 'Flashscore proxy недоступен, а GOAL API не настроен или не ответил' });
+    const fixtures = { data: goalData.history.rows };
+    rememberFixtures({ ...fixtures, provider: 'GOAL API' });
+    rememberStandingsTeams(goalData.standings);
+    syncGoalLiveSocket(goalData.history.rows);
+    return send(res, 200, { fixtures, standings: goalData.standings, provider: 'GOAL API', leagueId: LEAGUE_ID, season, range: { from: goalData.history.from, to: goalData.history.to }, fixtureHistoryComplete: goalData.history.complete, fetchedAt: new Date().toISOString() });
   }
   const rosterMatch = url.pathname.match(/^\/api\/teams\/([a-zA-Z0-9_-]{1,64})\/players$/);
   if (rosterMatch) {
-    if (!GOAL_API_KEY) return send(res, 503, { error: 'GOAL_API_KEY is not configured' });
     const teamId = rosterMatch[1];
     if (!knownTeams.has(teamId)) return send(res, 404, { error: 'Unknown RPL team' });
+    const flashscoreTeamCode = FLASH_TEAM_BY_GOAL_ID.get(teamId);
+    if (FLASHSCORE_ENABLED && flashscoreTeamCode) {
+      try {
+        const proxyRoster = flashscoreRoster(await flashscoreSquadPlayers(), flashscoreTeamCode);
+        let merged = proxyRoster;
+        if (GOAL_API_KEY) {
+          try {
+            const goalRoster = await goalGet(`/teams/${encodeURIComponent(teamId)}/players`, 6 * 60 * 60_000);
+            merged = mergeFlashscoreRosterWithGoal(proxyRoster, goalRoster);
+          } catch (error) { console.warn('GOAL API roster supplement unavailable:', error.message); }
+        }
+        const enriched = await enrichRoster(teamId, merged);
+        return send(res, 200, { ...enriched.payload, portraitFallback: enriched.meta, provider: 'Flashscore' });
+      } catch (error) { console.warn('Flashscore roster unavailable:', error.message); }
+    }
+    if (!GOAL_API_KEY) return send(res, 502, { error: 'Flashscore roster unavailable and GOAL API is not configured' });
     try {
       const payload = await goalGet(`/teams/${encodeURIComponent(teamId)}/players`, 6 * 60 * 60_000);
       const enriched = await enrichRoster(teamId, payload);
-      return send(res, 200, { ...enriched.payload, portraitFallback: enriched.meta });
+      return send(res, 200, { ...enriched.payload, portraitFallback: enriched.meta, provider: 'GOAL API' });
     } catch (error) {
       console.error('GOAL API roster request failed:', error.message);
       return send(res, 502, { error: 'Не удалось загрузить состав команды', status: error.status || 502 });
@@ -568,15 +763,35 @@ const server = http.createServer(async (req, res) => {
   }
   const lineupMatch = url.pathname.match(/^\/api\/fixtures\/([a-zA-Z0-9_-]{1,64})\/lineups$/);
   if (lineupMatch) {
-    if (!GOAL_API_KEY) return send(res, 503, { error: 'GOAL_API_KEY is not configured' });
     const fixtureId = lineupMatch[1];
     const fixture = knownFixtures.get(fixtureId);
     if (!fixture) return send(res, 404, { error: 'Unknown RPL fixture' });
-    const finished = /FINISHED|COMPLETE|ENDED|FT/.test(fixture.status);
+    let flashscoreLineups = null;
+    if (fixture.provider === 'Flashscore' && FLASHSCORE_ENABLED) {
+      try {
+        const [matchPayload, players] = await Promise.all([
+          flashscoreGet(`/api/match/${encodeURIComponent(fixture.flashscoreMatchId || fixtureId)}`),
+          flashscoreSquadPlayers().catch(() => [])
+        ]);
+        flashscoreLineups = flashscoreMatchLineups(matchPayload, fixture, rosterMapForFixture(players, fixture));
+        const homeCount = flashscoreLineups.data.home.startingLineups.length;
+        const awayCount = flashscoreLineups.data.away.startingLineups.length;
+        if (homeCount || awayCount) return send(res, 200, flashscoreLineups);
+      } catch (error) { console.warn('Flashscore lineups unavailable:', error.message); }
+    }
     try {
-      const payload = await goalGet(`/fixtures/${encodeURIComponent(fixtureId)}/lineups`, finished ? 24 * 60 * 60_000 : 10 * 60_000);
-      const enriched = await enrichLineups(payload, fixture);
-      return send(res, 200, { ...enriched.payload, portraitFallback: enriched.meta });
+      const goalPayload = await goalLineupsFor(fixtureId, fixture);
+      if (goalPayload) return send(res, 200, goalPayload);
+      if (flashscoreLineups) return send(res, 200, flashscoreLineups);
+      if (!GOAL_API_KEY) return send(res, 503, { error: 'No lineup provider is available' });
+    } catch (error) {
+      console.error('GOAL API lineup fallback failed:', error.message);
+      if (flashscoreLineups) return send(res, 200, flashscoreLineups);
+      return send(res, 502, { error: 'Не удалось загрузить составы матча', status: error.status || 502 });
+    }
+    try {
+      const goalPayload = await goalLineupsFor(fixtureId, fixture);
+      return goalPayload ? send(res, 200, goalPayload) : send(res, 502, { error: 'GOAL API fixture match ID could not be matched' });
     } catch (error) {
       console.error('GOAL API lineup request failed:', error.message);
       return send(res, 502, { error: 'Не удалось загрузить составы матча', status: error.status || 502 });
@@ -584,7 +799,6 @@ const server = http.createServer(async (req, res) => {
   }
   const matchDataRoute = url.pathname.match(/^\/api\/fixtures\/([a-zA-Z0-9_-]{1,64})\/(events|statistics)$/);
   if (matchDataRoute) {
-    if (!GOAL_API_KEY) return send(res, 503, { error: 'GOAL_API_KEY is not configured' });
     const fixtureId = matchDataRoute[1];
     const resource = matchDataRoute[2];
     const fixture = knownFixtures.get(fixtureId);
@@ -593,9 +807,26 @@ const server = http.createServer(async (req, res) => {
     const finished = /FINISHED|COMPLETE|ENDED|FT/.test(status);
     const live = /LIVE|PLAY|IN.?PROGRESS|1H|2H|HALF.?TIME|HT/.test(status);
     const ttl = finished ? 24 * 60 * 60_000 : live ? 60_000 : 10 * 60_000;
+    let flashscoreData = null;
+    if (fixture.provider === 'Flashscore' && FLASHSCORE_ENABLED) {
+      try {
+        const [matchPayload, players] = await Promise.all([
+          flashscoreGet(`/api/match/${encodeURIComponent(fixture.flashscoreMatchId || fixtureId)}`),
+          flashscoreSquadPlayers().catch(() => [])
+        ]);
+        const rosterById = rosterMapForFixture(players, fixture);
+        flashscoreData = resource === 'events'
+          ? flashscoreMatchEvents(matchPayload, fixture, rosterById)
+          : flashscoreMatchStatistics(matchPayload);
+        if (Array.isArray(flashscoreData.data) && flashscoreData.data.length) return send(res, 200, flashscoreData);
+      } catch (error) { console.warn(`Flashscore fixture ${resource} unavailable:`, error.message); }
+    }
     try {
-      const payload = await goalGet(`/fixtures/${encodeURIComponent(fixtureId)}/${resource}`, ttl);
-      return send(res, 200, payload);
+      const payload = await goalMatchDataFor(fixtureId, fixture, resource, ttl);
+      if (payload) return send(res, 200, sourcedPayload(payload, 'GOAL API'));
+      if (flashscoreData) return send(res, 200, flashscoreData);
+      if (!GOAL_API_KEY) return send(res, 503, { error: `No ${resource} provider is available` });
+      return send(res, 502, { error: 'GOAL API fixture match ID could not be matched' });
     } catch (error) {
       console.error(`GOAL API fixture ${resource} request failed:`, error.message);
       return send(res, 502, { error: resource === 'events' ? 'Не удалось загрузить события матча' : 'Не удалось загрузить статистику матча', status: error.status || 502 });
@@ -609,8 +840,11 @@ const server = http.createServer(async (req, res) => {
     return send(res, 200, body, MIME[ext] || 'application/octet-stream', { 'Cache-Control': ext === '.html' ? 'no-cache' : 'public, max-age=300' });
   } catch { return send(res, 404, { error: 'Not found' }); }
 });
+startFlashscoreProxy();
+server.on('close', stopFlashscoreProxy);
 server.listen(PORT, '0.0.0.0', () => {
   console.log(`ТЕМП is running on http://0.0.0.0:${PORT}`);
-  console.log(`GOAL API: ${GOAL_API_KEY ? 'configured (key hidden)' : 'not configured — demo mode'}`);
+  console.log(`Flashscore proxy: ${FLASHSCORE_ENABLED ? 'enabled' : 'disabled'}`);
+  console.log(`GOAL API fallback/supplement: ${GOAL_API_KEY ? 'configured (key hidden)' : 'not configured'}`);
   console.log(`API-Football portrait fallback: ${API_FOOTBALL_API_KEY ? 'configured (key hidden)' : 'not configured'}`);
 });

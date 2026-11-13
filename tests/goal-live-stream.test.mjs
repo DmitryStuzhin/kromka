@@ -32,7 +32,7 @@ test('GOAL live stream begins truthfully in idle state without exposing credenti
   const baseUrl = `http://127.0.0.1:${port}`;
   const child = spawn(process.execPath, [serverScript], {
     cwd: projectRoot,
-    env: { ...process.env, PORT: String(port), GOAL_API_KEY: '', API_FOOTBALL_API_KEY: '' },
+    env: { ...process.env, PORT: String(port), GOAL_API_KEY: '', API_FOOTBALL_API_KEY: '', RPL_FLASHSCORE_ENABLED: 'false', RPL_FLASHSCORE_AUTOSTART: 'false' },
     stdio: 'ignore'
   });
   t.after(() => { if (child.exitCode === null) child.kill('SIGTERM'); });
@@ -61,11 +61,14 @@ test('GOAL live stream begins truthfully in idle state without exposing credenti
 
 test('PWA accepts only known GOAL fixture updates and retains REST polling', async () => {
   const client = await readFile(path.join(projectRoot, 'goal-data.js'), 'utf8');
+  const server = await readFile(serverScript, 'utf8');
   const html = await readFile(path.join(projectRoot, 'index.html'), 'utf8');
   const worker = await readFile(path.join(projectRoot, 'service-worker.js'), 'utf8');
   assert.ok(client.includes("new EventSource('/api/live-stream')"));
   assert.ok(client.includes("update.provider !== 'GOAL API'"));
   assert.ok(client.includes('matches.find((entry) => String(entry.id) === String(update.fixtureId))'));
+  assert.ok(server.includes("fixture.provider === 'Flashscore' && fixture.goalFixtureId === id"));
+  assert.ok(server.includes('fixtureId: displayFixtureId'));
   assert.ok(client.includes('Number.isInteger(update.homeScore)') && client.includes('Number.isInteger(update.awayScore)'));
   assert.match(client, /setInterval\(\(\) => \{ if \(window\.isLiveData && document\.visibilityState === 'visible'\) refresh\(\{ quiet: true \}\).*5 \* 60 \* 1000\);/s);
   const clientUrl = html.match(/<script src="(\/goal-data\.js\?v=[^"]+)" defer>/)?.[1];

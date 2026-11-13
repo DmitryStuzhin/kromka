@@ -36,7 +36,7 @@ test('event and statistics endpoints reject fixture IDs not previously loaded in
   const baseUrl = `http://127.0.0.1:${port}`;
   const child = spawn(process.execPath, [serverScript], {
     cwd: projectRoot,
-    env: { ...process.env, PORT: String(port), GOAL_API_KEY: 'test-placeholder-only', API_FOOTBALL_API_KEY: '' },
+    env: { ...process.env, PORT: String(port), GOAL_API_KEY: 'test-placeholder-only', API_FOOTBALL_API_KEY: '', RPL_FLASHSCORE_ENABLED: 'false', RPL_FLASHSCORE_AUTOSTART: 'false' },
     stdio: 'ignore'
   });
   t.after(() => { if (child.exitCode === null) child.kill('SIGTERM'); });

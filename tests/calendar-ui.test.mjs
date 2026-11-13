@@ -46,13 +46,13 @@ test('home and the Matches tab share the week controls but render separate daily
   assert.match(html, /data-week-shift/);
 });
 
-test('empty calendar days stay empty and both demo and GOAL fixtures are filtered by their actual date keys', () => {
+test('empty calendar days stay empty and demo/live fixtures are filtered by their actual date keys', () => {
   assert.doesNotMatch(live, /const offsets\s*=\s*\[-1,\s*0,\s*1,\s*6,\s*7,\s*13,\s*14\]/);
   assert.match(html, /dateKey:'2026-11-02'/);
   assert.match(html, /В расписании на эту дату матчей нет\./);
   assert.match(live, /m\.dateKey === selectedIso\(\)/);
   assert.match(live, /m\.dateKey >= calendarDates\[0\].*m\.dateKey <= calendarDates\[6\]/);
-  assert.match(live, /В расписании GOAL API на эту дату матчей нет\./);
+  assert.match(live, /В расписании \$\{safe\(dataProviderName\(\)\)\} на эту дату матчей нет\./);
   assert.match(html, /дни без матчей не заполняются демо-играми/);
   assert.match(live, /Дни без матчей показаны пустыми, без демо-игр/);
 });
