@@ -1,0 +1,616 @@
+import http from 'node:http';
+import { createHash } from 'node:crypto';
+import { mkdir, readFile, rename, stat, writeFile } from 'node:fs/promises';
+import path from 'node:path';
+import { fileURLToPath } from 'node:url';
+
+const ROOT = path.dirname(fileURLToPath(import.meta.url));
+const PORT = Number(process.env.PORT || 4173);
+const GOAL_API_KEY = process.env.GOAL_API_KEY || '';
+const API_FOOTBALL_API_KEY = process.env.API_FOOTBALL_API_KEY || '';
+const LEAGUE_ID = process.env.GOAL_RPL_LEAGUE_ID || 'cmr77dvua00a4rx061d2jre7p';
+const API_BASE = 'https://api.goal-api.com/v1';
+const API_FOOTBALL_BASE = 'https://v3.football.api-sports.io';
+const SQUAD_CACHE_TTL = 7 * 24 * 60 * 60_000;
+const PORTRAIT_CHECK_TTL = 7 * 24 * 60 * 60_000;
+const API_FOOTBALL_DAILY_GUARD = 80;
+const API_FOOTBALL_CACHE_PATH = path.join(ROOT, '.cache', 'api-football-squads.json');
+const API_FOOTBALL_GENERIC_PHOTO_HASHES = new Set([
+  // Verified generic gray silhouette returned for two distinct Dynamo squad player URLs.
+  '2ff7d52a628fce5d954c58480dde4e47396db4bb405b7b7d6a6567134bf86422'
+]);
+const API_FOOTBALL_TEAM_IDS_BY_GOAL_ID = new Map([
+  ['cmr7uolsy8mghrx06jog9s5dt', 1088], // Dynamo Moscow
+  ['cmr7uolst8mgfrx06mqhdh3qs', 596],  // Zenit
+  ['cmr7uolsu8mggrx06zkk540w9', 555],  // CSKA Moscow
+  ['cmr7uolsb8mg6rx06bm79bwbe', 621],  // Krasnodar
+  ['cmr7uolso8mgcrx06cn6sa9ix', 558],  // Spartak Moscow
+  ['cmr7uolsy8mgirx06lps95sxi', 779],  // Rostov
+  ['cmr7uolt88mglrx06dkah1bw7', 1080], // Orenburg
+  ['cmr7uolt48mgkrx06mtepmfuh', 1079], // Krylia Sovetov
+  ['cmr7uolso8mgbrx06e5bwsovt', 1083], // Rubin Kazan
+  ['cmr7uolsf8mg8rx06mricgkwz', 2006], // Baltika
+  ['cmr7uolt08mgjrx06xj1x745j', 6813], // Dynamo Makhachkala
+  ['cmr7uopea8ns6rx06dhawawlh', 6822], // Rodina Moscow
+  ['cmr7uolsj8mg9rx06lps3j1ye', 6786], // Akron
+  ['cmr7uolsb8mg7rx06aps282s2', 597],  // Lokomotiv Moscow
+  ['cmr7uolte8mgprx06586mvsut', 1085], // Akhmat Grozny
+  ['cmr7uop9q8nosrx06j3ktdh8n', 1993]   // Fakel
+]);
+const cache = new Map();
+const knownFixtures = new Map();
+const knownTeams = new Set();
+const apiFootballPendingSquads = new Map();
+const apiFootballPendingPortraitChecks = new Map();
+let persistentCache = { version: 1, teams: {}, portraitChecks: {}, dailyRequests: {} };
+let persistentCacheLoad;
+let persistentCacheWrite = Promise.resolve();
+const liveStreamClients = new Set();
+let goalLiveSocket = null;
+let goalLiveFixtureIds = [];
+let goalLiveFixtureKey = '';
+let goalLiveGeneration = 0;
+let goalLiveRetryTimer = null;
+let goalLiveRetryAttempt = 0;
+let goalLiveState = { provider: 'GOAL API', transport: 'WebSocket', state: 'idle', matchCount: 0, updatedAt: null };
+const MIME = { '.html':'text/html; charset=utf-8','.css':'text/css; charset=utf-8','.js':'text/javascript; charset=utf-8','.json':'application/json; charset=utf-8','.svg':'image/svg+xml','.png':'image/png','.jpg':'image/jpeg','.jpeg':'image/jpeg','.webmanifest':'application/manifest+json' };
+
+function send(res, status, body, type = 'application/json; charset=utf-8', headers = {}) {
+  res.writeHead(status, { 'Content-Type': type, 'X-Content-Type-Options': 'nosniff', 'Cache-Control': 'no-store', ...headers });
+  res.end(typeof body === 'string' || Buffer.isBuffer(body) ? body : JSON.stringify(body));
+}
+function emitLiveStream(event, value) {
+  const frame = `event: ${event}\ndata: ${JSON.stringify(value)}\n\n`;
+  for (const client of liveStreamClients) {
+    try { client.write(frame); } catch { liveStreamClients.delete(client); }
+  }
+}
+function setGoalLiveState(state, matchCount = goalLiveFixtureIds.length) {
+  goalLiveState = { provider: 'GOAL API', transport: 'WebSocket', state, matchCount, updatedAt: new Date().toISOString() };
+  emitLiveStream('state', goalLiveState);
+}
+function persistentObject(value) { return value && typeof value === 'object' && !Array.isArray(value) ? value : {}; }
+async function loadPersistentCache() {
+  if (!persistentCacheLoad) {
+    persistentCacheLoad = (async () => {
+      try {
+        const saved = JSON.parse(await readFile(API_FOOTBALL_CACHE_PATH, 'utf8'));
+        persistentCache = {
+          version: 1,
+          teams: persistentObject(saved.teams),
+          portraitChecks: persistentObject(saved.portraitChecks),
+          dailyRequests: persistentObject(saved.dailyRequests)
+        };
+      } catch (error) {
+        if (error.code !== 'ENOENT') console.warn('API-Football cache could not be read; starting empty.');
+      }
+    })();
+  }
+  await persistentCacheLoad;
+}
+function savePersistentCache() {
+  const snapshot = JSON.stringify(persistentCache);
+  const write = persistentCacheWrite.then(async () => {
+    await mkdir(path.dirname(API_FOOTBALL_CACHE_PATH), { recursive: true });
+    const temp = `${API_FOOTBALL_CACHE_PATH}.${process.pid}.tmp`;
+    await writeFile(temp, snapshot, { mode: 0o600 });
+    await rename(temp, API_FOOTBALL_CACHE_PATH);
+  });
+  persistentCacheWrite = write.catch((error) => console.warn('API-Football cache could not be saved:', error.message));
+  return write;
+}
+async function reserveApiFootballRequest() {
+  await loadPersistentCache();
+  const today = new Date().toISOString().slice(0, 10);
+  const used = Number(persistentCache.dailyRequests[today] || 0);
+  if (used >= API_FOOTBALL_DAILY_GUARD) return false;
+  persistentCache.dailyRequests[today] = used + 1;
+  for (const day of Object.keys(persistentCache.dailyRequests)) if (day < today.slice(0, 8) + '01') delete persistentCache.dailyRequests[day];
+  await savePersistentCache();
+  return true;
+}
+async function goalGet(endpoint, ttl) {
+  const entry = cache.get(endpoint);
+  if (entry && Date.now() - entry.at < ttl) return entry.value;
+  const response = await fetch(`${API_BASE}${endpoint}`, { headers: { Authorization: `Bearer ${GOAL_API_KEY}`, Accept: 'application/json' }, signal: AbortSignal.timeout(15000) });
+  if (!response.ok) { const error = new Error(`GOAL API returned ${response.status}`); error.status = response.status; throw error; }
+  const value = await response.json(); cache.set(endpoint, { at: Date.now(), value }); return value;
+}
+function goalStatusCategory(value) {
+  if (value && typeof value === 'object') value = [value.state, value.status, value.name, value.short, value.code, value.description, value.type?.name, value.type?.state].filter(Boolean).join(' ');
+  const status = String(value ?? '').toUpperCase().replace(/[\s_-]+/g, ' ');
+  if (/FINISHED|FULL TIME|COMPLETE|COMPLETED|ENDED|\bFT\b/.test(status)) return 'finished';
+  if (/\bLIVE\b|IN PLAY|IN PROGRESS|\b1H\b|\b2H\b|\bHT\b|HALF TIME|FIRST HALF|SECOND HALF|EXTRA TIME|\bET\b|\bBT\b/.test(status)) return 'live';
+  return '';
+}
+function goalMatchIsLive(item) {
+  return item?.matchLive === true || item?.live === true || goalStatusCategory(item?.matchStatus || item?.match_status || item?.status || item?.state) === 'live';
+}
+function goalScoreNumber(value) {
+  if (value && typeof value === 'object') value = value.value ?? value.current ?? value.score;
+  if (value === null || value === undefined || value === '') return null;
+  if (typeof value !== 'number' && !/^\d{1,2}$/.test(String(value).trim())) return null;
+  const number = Number(value);
+  return Number.isInteger(number) && number >= 0 ? number : null;
+}
+function goalClockMinute(data) {
+  for (const value of [data?.minute, data?.matchMinute, data?.clock?.minute, data?.match_status]) {
+    const minute = String(value ?? '').trim();
+    if (/^\d{1,3}(?:\+\d{1,2})?$/.test(minute)) return minute;
+  }
+  return '';
+}
+function applyGoalSocketMessage(message) {
+  if (message?.type !== 'match_update') return;
+  const data = message.data && typeof message.data === 'object' ? message.data : {};
+  const id = String(message.matchId || message.match_id || data.matchId || data.match_id || data.fixtureId || data.fixture_id || data.id || data.fixture?.id || (goalLiveFixtureIds.length === 1 ? goalLiveFixtureIds[0] : ''));
+  if (!id || !goalLiveFixtureIds.includes(id) || !knownFixtures.has(id)) return;
+  const homeScore = goalScoreNumber(data.homeScore ?? data.homeTeamScore ?? data.match_hometeam_score ?? data.score?.home);
+  const awayScore = goalScoreNumber(data.awayScore ?? data.awayTeamScore ?? data.match_awayteam_score ?? data.score?.away);
+  const minute = goalClockMinute(data);
+  const status = goalStatusCategory(data.status ?? data.matchStatus ?? data.match_status ?? data.fixtureStatus ?? data.state);
+  if (homeScore === null && awayScore === null && !minute && !status) return;
+  if (status) {
+    const fixture = knownFixtures.get(id);
+    knownFixtures.set(id, { ...fixture, status: status === 'finished' ? 'FINISHED' : 'LIVE' });
+  }
+  emitLiveStream('fixture', { fixtureId: id, provider: 'GOAL API', transport: 'WebSocket', homeScore, awayScore, minute, status, receivedAt: new Date().toISOString() });
+}
+function scheduleGoalSocketRetry(generation) {
+  if (generation !== goalLiveGeneration || !goalLiveFixtureIds.length || goalLiveRetryTimer) return;
+  const delays = [5_000, 15_000, 30_000, 60_000, 5 * 60_000, 15 * 60_000];
+  const delay = delays[Math.min(goalLiveRetryAttempt, delays.length - 1)];
+  goalLiveRetryAttempt += 1;
+  goalLiveRetryTimer = setTimeout(() => {
+    goalLiveRetryTimer = null;
+    connectGoalLiveSocket(generation).catch((error) => {
+      if (generation !== goalLiveGeneration) return;
+      console.warn('GOAL live socket reconnect failed:', error.message);
+      setGoalLiveState('reconnecting');
+      scheduleGoalSocketRetry(generation);
+    });
+  }, delay);
+}
+async function connectGoalLiveSocket(generation) {
+  if (generation !== goalLiveGeneration || !GOAL_API_KEY || !goalLiveFixtureIds.length) return;
+  if (typeof WebSocket !== 'function') { setGoalLiveState('unavailable', 0); return; }
+  const response = await fetch(`${API_BASE}/ws/token`, { method: 'POST', headers: { Authorization: `Bearer ${GOAL_API_KEY}` }, signal: AbortSignal.timeout(15000) });
+  let payload = {};
+  try { payload = await response.json(); } catch { /* handled as an invalid token response */ }
+  const token = payload?.data?.token;
+  if (!response.ok || !token) throw new Error(`GOAL WebSocket token returned ${response.status}`);
+  if (generation !== goalLiveGeneration) return;
+  const socket = new WebSocket(`wss://api.goal-api.com/ws?wsToken=${encodeURIComponent(token)}`);
+  goalLiveSocket = socket;
+  let heartbeat;
+  socket.addEventListener('open', () => {
+    if (generation !== goalLiveGeneration) return socket.close();
+    socket.send(JSON.stringify({ type: 'auth', token }));
+  });
+  socket.addEventListener('message', (event) => {
+    let message;
+    try { message = JSON.parse(String(event.data)); } catch { return; }
+    if (message.type === 'auth_success') {
+      const maximum = Number(message.data?.maxSubscriptions ?? message.maxSubscriptions ?? 0);
+      if (!maximum) {
+        setGoalLiveState('unavailable', 0);
+        return socket.close(4001, 'No match subscriptions available');
+      }
+      goalLiveRetryAttempt = 0;
+      const ids = goalLiveFixtureIds.slice(0, Math.min(maximum, 25));
+      setGoalLiveState('connected', ids.length);
+      for (const matchId of ids) socket.send(JSON.stringify({ type: 'subscribe', resource: 'match', matchId }));
+      heartbeat = setInterval(() => { if (socket.readyState === WebSocket.OPEN) socket.send(JSON.stringify({ type: 'ping' })); }, 30_000);
+      return;
+    }
+    if (message.type === 'match_update') applyGoalSocketMessage(message);
+    if (message.type === 'error') {
+      const code = String(message.error?.code || message.code || 'provider-error');
+      console.warn('GOAL live socket reported an error:', code);
+      if (goalLiveState.state !== 'unavailable') socket.close();
+    }
+  });
+  socket.addEventListener('close', () => {
+    if (heartbeat) clearInterval(heartbeat);
+    if (goalLiveSocket === socket) goalLiveSocket = null;
+    if (generation !== goalLiveGeneration || goalLiveState.state === 'unavailable') return;
+    setGoalLiveState('reconnecting');
+    scheduleGoalSocketRetry(generation);
+  });
+  socket.addEventListener('error', () => {
+    if (generation === goalLiveGeneration) setGoalLiveState('reconnecting');
+  });
+}
+function syncGoalLiveSocket(fixtures) {
+  const ids = fixtureRowsOf(fixtures).filter(goalMatchIsLive).map((fixture) => String(fixture?.id || fixture?.fixtureId || '')).filter((id) => id && knownFixtures.has(id)).slice(0, 25);
+  const nextKey = ids.join('|');
+  if (nextKey === goalLiveFixtureKey) return;
+  goalLiveFixtureKey = nextKey;
+  goalLiveFixtureIds = ids;
+  goalLiveGeneration += 1;
+  const generation = goalLiveGeneration;
+  if (goalLiveRetryTimer) { clearTimeout(goalLiveRetryTimer); goalLiveRetryTimer = null; }
+  const previous = goalLiveSocket;
+  goalLiveSocket = null;
+  if (previous) previous.close(1000, 'RPL live fixtures changed');
+  goalLiveRetryAttempt = 0;
+  if (!GOAL_API_KEY || !ids.length) { setGoalLiveState('idle', 0); return; }
+  setGoalLiveState('connecting', ids.length);
+  connectGoalLiveSocket(generation).catch((error) => {
+    if (generation !== goalLiveGeneration) return;
+    console.warn('GOAL live socket connection failed:', error.message);
+    setGoalLiveState('reconnecting');
+    scheduleGoalSocketRetry(generation);
+  });
+}
+function teamIdOf(team) { return String(team?.id || team?.teamId || team?.team_id || ''); }
+function rememberFixtures(payload) {
+  const rows = Array.isArray(payload?.data) ? payload.data : Array.isArray(payload) ? payload : [];
+  for (const item of rows) {
+    const id = String(item?.id || item?.fixtureId || '');
+    const homeTeamId = String(item?.homeTeamId || item?.home_team_id || teamIdOf(item?.homeTeam || item?.home_team || item?.teams?.home) || '');
+    const awayTeamId = String(item?.awayTeamId || item?.away_team_id || teamIdOf(item?.awayTeam || item?.away_team || item?.teams?.away) || '');
+    if (id) knownFixtures.set(id, { status: String(item.matchStatus || item.status || '').toUpperCase(), homeTeamId, awayTeamId });
+    for (const teamId of [homeTeamId, awayTeamId]) if (teamId) knownTeams.add(teamId);
+  }
+}
+function rememberStandingsTeams(value, depth = 0) {
+  if (!value || typeof value !== 'object' || depth > 8) return;
+  if (Array.isArray(value)) { for (const row of value) rememberStandingsTeams(row, depth + 1); return; }
+  for (const id of [value.teamId, value.team_id, value.team?.id, value.club?.id, value.participant?.id]) if (id) knownTeams.add(String(id));
+  for (const [key, child] of Object.entries(value)) if (child && typeof child === 'object' && !['team', 'club', 'participant'].includes(key)) rememberStandingsTeams(child, depth + 1);
+}
+function moscowDay() {
+  const parts = Object.fromEntries(new Intl.DateTimeFormat('en-CA', { timeZone: 'Europe/Moscow', year: 'numeric', month: '2-digit', day: '2-digit' }).formatToParts(new Date()).map((part) => [part.type, part.value]));
+  return `${parts.year}-${parts.month}-${parts.day}`;
+}
+function shiftDay(iso, days) { const date = new Date(`${iso}T12:00:00Z`); date.setUTCDate(date.getUTCDate() + days); return date.toISOString().slice(0, 10); }
+function resolvePath(pathname) {
+  let decoded; try { decoded = decodeURIComponent(pathname.split('?')[0]); } catch { return null; }
+  const requested = decoded === '/' ? '/index.html' : decoded;
+  if (requested.split('/').some((part) => part.startsWith('.'))) return null;
+  const publicFile = ['/index.html', '/goal-data.js', '/service-worker.js', '/manifest.json'].includes(requested)
+    || /^\/(?:assets|previews)\/.+\.(?:css|js|png|jpe?g|webp|avif|gif|svg|ico|woff2?|ttf|otf)$/i.test(requested);
+  if (!publicFile) return null;
+  const file = path.resolve(ROOT, `.${requested}`);
+  return file.startsWith(`${ROOT}${path.sep}`) ? file : null;
+}
+function approvedUrl(value, host) {
+  try { const url = new URL(String(value || '')); return url.protocol === 'https:' && url.hostname === host ? url.href : ''; }
+  catch { return ''; }
+}
+function goalPortraitOf(player) {
+  for (const value of [player?.image, player?.playerImage, player?.photo, player?.avatar]) {
+    const url = approvedUrl(value, 'media.goal-api.com');
+    if (url) return url;
+  }
+  return '';
+}
+function nameTokens(value) {
+  const transliteration = { а:'a', б:'b', в:'v', г:'g', д:'d', е:'e', ё:'e', ж:'zh', з:'z', и:'i', й:'y', к:'k', л:'l', м:'m', н:'n', о:'o', п:'p', р:'r', с:'s', т:'t', у:'u', ф:'f', х:'kh', ц:'ts', ч:'ch', ш:'sh', щ:'shch', ъ:'', ы:'y', ь:'', э:'e', ю:'yu', я:'ya' };
+  const latin = String(value || '').toLowerCase().normalize('NFKD').replace(/[\u0300-\u036f]/g, '').replace(/[а-яё]/g, (letter) => transliteration[letter] ?? letter);
+  return latin.split(/[^a-z0-9]+/).filter(Boolean);
+}
+function apiFootballMatch(goalPlayer, squad) {
+  const playerName = goalPlayer?.name || goalPlayer?.lineupPlayer || goalPlayer?.displayName || '';
+  const goalTokens = nameTokens(playerName);
+  if (!goalTokens.length) return null;
+  const goalKey = goalTokens.join(' ');
+  const goalSorted = [...goalTokens].sort().join(' ');
+  const rank = (candidate) => {
+    const tokens = nameTokens(candidate?.name);
+    if (!tokens.length) return 0;
+    const key = tokens.join(' ');
+    if (key === goalKey || [...tokens].sort().join(' ') === goalSorted) return 3;
+    const abbreviationMatches = (short, long) => short.length >= 2 && short[0].length === 1 && long.length >= 2 &&
+      long[0].startsWith(short[0]) && short.slice(1).length > 0 && short.slice(1).every((word) => long.slice(1).includes(word));
+    if (abbreviationMatches(tokens, goalTokens) || abbreviationMatches(goalTokens, tokens)) return 2;
+    return 0;
+  };
+  const ranked = squad.map((candidate) => ({ candidate, score: rank(candidate) })).filter((entry) => entry.score > 0);
+  const best = Math.max(0, ...ranked.map((entry) => entry.score));
+  const matches = ranked.filter((entry) => entry.score === best);
+  return matches.length === 1 ? matches[0].candidate : null;
+}
+async function apiFootballSquad(goalTeamId) {
+  if (!API_FOOTBALL_API_KEY) return null;
+  const apiTeamId = API_FOOTBALL_TEAM_IDS_BY_GOAL_ID.get(String(goalTeamId));
+  if (!apiTeamId) return null;
+  await loadPersistentCache();
+  const key = String(apiTeamId);
+  const cached = persistentCache.teams[key];
+  if (cached && Array.isArray(cached.players) && Date.now() - Number(cached.fetchedAt || 0) < SQUAD_CACHE_TTL) return cached.players;
+  if (apiFootballPendingSquads.has(key)) return apiFootballPendingSquads.get(key);
+  const request = (async () => {
+    const allowed = await reserveApiFootballRequest();
+    if (!allowed) return Array.isArray(cached?.players) ? cached.players : null;
+    try {
+      const response = await fetch(`${API_FOOTBALL_BASE}/players/squads?team=${encodeURIComponent(apiTeamId)}`, {
+        headers: { 'x-apisports-key': API_FOOTBALL_API_KEY, Accept: 'application/json' },
+        signal: AbortSignal.timeout(15000)
+      });
+      if (!response.ok) throw new Error(`HTTP ${response.status}`);
+      const payload = await response.json();
+      const errors = payload?.errors;
+      if ((Array.isArray(errors) && errors.length) || (errors && typeof errors === 'object' && !Array.isArray(errors) && Object.keys(errors).length)) throw new Error('provider returned an API error');
+      const team = Array.isArray(payload?.response) ? payload.response[0] : null;
+      if (Number(team?.team?.id) !== Number(apiTeamId)) throw new Error('team ID did not match the configured crosswalk');
+      if (!Array.isArray(team?.players)) throw new Error('unexpected squads response');
+      const players = team.players.map((player) => ({
+        id: String(player?.id || ''),
+        name: String(player?.name || '').trim(),
+        number: player?.number === null || player?.number === undefined ? '' : String(player.number),
+        position: String(player?.position || ''),
+        photo: approvedUrl(player?.photo, 'media.api-sports.io')
+      })).filter((player) => player.id && player.name && player.photo);
+      persistentCache.teams[key] = { fetchedAt: Date.now(), players };
+      await savePersistentCache();
+      return players;
+    } catch (error) {
+      console.warn('API-Football squad fallback unavailable for team', key, error.message);
+      return Array.isArray(cached?.players) ? cached.players : null;
+    }
+  })();
+  apiFootballPendingSquads.set(key, request);
+  try { return await request; }
+  finally { apiFootballPendingSquads.delete(key); }
+}
+async function validateApiFootballPhoto(player) {
+  const id = String(player?.id || '');
+  const expectedUrl = `https://media.api-sports.io/football/players/${id}.png`;
+  const url = approvedUrl(player?.photo, 'media.api-sports.io');
+  if (!/^\d+$/.test(id) || !url) return { ok: false, hash: '', reason: 'invalid-url' };
+  let parsed;
+  try { parsed = new URL(url); } catch { return { ok: false, hash: '', reason: 'invalid-url' }; }
+  if (parsed.pathname !== `/football/players/${id}.png`) return { ok: false, hash: '', reason: 'invalid-url' };
+  await loadPersistentCache();
+  const cached = persistentCache.portraitChecks[id];
+  if (cached && Date.now() - Number(cached.checkedAt || 0) < PORTRAIT_CHECK_TTL) {
+    const hash = String(cached.hash || '');
+    const reason = String(cached.reason || (API_FOOTBALL_GENERIC_PHOTO_HASHES.has(hash) ? 'generic-silhouette' : cached.ok ? 'ok' : 'unverified'));
+    return { ok: Boolean(cached.ok), hash, reason };
+  }
+  if (apiFootballPendingPortraitChecks.has(id)) return apiFootballPendingPortraitChecks.get(id);
+  const check = (async () => {
+    let result = { ok: false, hash: '', reason: 'unverified' };
+    try {
+      const response = await fetch(expectedUrl, { redirect: 'error', signal: AbortSignal.timeout(10000) });
+      if (!response.ok || !String(response.headers.get('content-type') || '').toLowerCase().startsWith('image/')) throw new Error('photo could not be verified');
+      const length = Number(response.headers.get('content-length') || 0);
+      if (length > 2 * 1024 * 1024) throw new Error('photo exceeded size limit');
+      const bytes = Buffer.from(await response.arrayBuffer());
+      if (!bytes.length || bytes.length > 2 * 1024 * 1024) throw new Error('photo exceeded size limit');
+      const hash = createHash('sha256').update(bytes).digest('hex');
+      const generic = API_FOOTBALL_GENERIC_PHOTO_HASHES.has(hash);
+      result = { ok: !generic, hash, reason: generic ? 'generic-silhouette' : 'ok' };
+    } catch (error) {
+      console.warn('API-Football portrait could not be verified for player', id, error.message);
+    }
+    persistentCache.portraitChecks[id] = { checkedAt: Date.now(), ok: result.ok, hash: result.hash, reason: result.reason };
+    await savePersistentCache();
+    return result;
+  })();
+  apiFootballPendingPortraitChecks.set(id, check);
+  try { return await check; }
+  finally { apiFootballPendingPortraitChecks.delete(id); }
+}
+async function fallbackAssignments(players, apiSquad) {
+  const assignments = new Map();
+  const stats = { configured: Boolean(API_FOOTBALL_API_KEY), attempted: false, applied: 0, rejectedPhotos: 0, rejectedSilhouettes: 0, rejectedDuplicateImages: 0, unmatched: 0 };
+  if (!Array.isArray(players) || !players.length || !Array.isArray(apiSquad) || !apiSquad.length) return { assignments, stats };
+  stats.attempted = true;
+  const candidates = [];
+  for (const player of players) {
+    if (goalPortraitOf(player)) continue;
+    const match = apiFootballMatch(player, apiSquad);
+    if (match) candidates.push({ player, match });
+    else stats.unmatched += 1;
+  }
+  const uniqueMatches = new Map(candidates.map(({ match }) => [String(match.id), match]));
+  const checks = await Promise.all([...uniqueMatches.values()].map(async (match) => ({ match, check: await validateApiFootballPhoto(match) })));
+  const checkById = new Map(checks.map(({ match, check }) => [String(match.id), check]));
+  const hashCounts = new Map();
+  for (const { check } of checks) if (check.ok && check.hash) hashCounts.set(check.hash, (hashCounts.get(check.hash) || 0) + 1);
+  for (const { player, match } of candidates) {
+    const check = checkById.get(String(match.id)) || { ok: false, hash: '', reason: 'unverified' };
+    if (!check.ok) {
+      stats.rejectedPhotos += 1;
+      if (check.reason === 'generic-silhouette') stats.rejectedSilhouettes += 1;
+      continue;
+    }
+    if (check.hash && hashCounts.get(check.hash) > 1) { stats.rejectedPhotos += 1; stats.rejectedDuplicateImages += 1; continue; }
+    assignments.set(player, `https://media.api-sports.io/football/players/${match.id}.png`);
+  }
+  stats.applied = assignments.size;
+  return { assignments, stats };
+}
+async function enrichRoster(teamId, payload) {
+  const rows = Array.isArray(payload?.data) ? payload.data : null;
+  const baseMeta = { provider: 'API-Football', configured: Boolean(API_FOOTBALL_API_KEY), attempted: false, applied: 0, rejectedPhotos: 0, rejectedSilhouettes: 0, rejectedDuplicateImages: 0, unmatched: 0 };
+  if (!rows || !rows.some((player) => !goalPortraitOf(player))) return { payload, meta: baseMeta };
+  const squad = await apiFootballSquad(teamId);
+  if (!squad) return { payload, meta: { ...baseMeta, attempted: Boolean(API_FOOTBALL_API_KEY), unavailable: true } };
+  const { assignments, stats } = await fallbackAssignments(rows, squad);
+  const enrichedRows = rows.map((player) => {
+    const image = assignments.get(player);
+    return image ? { ...player, image, portraitSource: 'API-Football' } : player;
+  });
+  return { payload: { ...payload, data: enrichedRows }, meta: { ...baseMeta, ...stats } };
+}
+function lineupArrayKey(key) { return /starting|starter|substitut|bench/i.test(String(key || '')); }
+function collectLineupPlayers(value, insideLineup = false, output = [], seen = new Set()) {
+  if (Array.isArray(value)) { for (const child of value) collectLineupPlayers(child, insideLineup, output, seen); return output; }
+  if (!value || typeof value !== 'object') return output;
+  const hasName = Boolean(value.name || value.lineupPlayer || value.displayName);
+  if (insideLineup && hasName && !seen.has(value)) { seen.add(value); output.push(value); }
+  for (const [key, child] of Object.entries(value)) collectLineupPlayers(child, insideLineup || lineupArrayKey(key), output, seen);
+  return output;
+}
+function mapLineupPlayers(value, assignments, insideLineup = false) {
+  if (Array.isArray(value)) return value.map((child) => mapLineupPlayers(child, assignments, insideLineup));
+  if (!value || typeof value !== 'object') return value;
+  const copy = {};
+  for (const [key, child] of Object.entries(value)) copy[key] = mapLineupPlayers(child, assignments, insideLineup || lineupArrayKey(key));
+  if (insideLineup && assignments.has(value)) {
+    copy.image = assignments.get(value);
+    copy.portraitSource = 'API-Football';
+  }
+  return copy;
+}
+async function enrichLineups(payload, fixture) {
+  const outer = payload?.data && typeof payload.data === 'object' && !Array.isArray(payload.data) ? payload : null;
+  const root = outer ? payload.data : payload;
+  if (!root || typeof root !== 'object') return { payload, meta: { configured: Boolean(API_FOOTBALL_API_KEY), applied: 0 } };
+  const homeKey = root.home ? 'home' : root.homeTeam ? 'homeTeam' : '';
+  const awayKey = root.away ? 'away' : root.awayTeam ? 'awayTeam' : '';
+  const sideSpecs = [
+    { key: homeKey, teamId: fixture.homeTeamId },
+    { key: awayKey, teamId: fixture.awayTeamId }
+  ].filter((side) => side.key && side.teamId);
+  const allAssignments = new Map();
+  let applied = 0;
+  for (const side of sideSpecs) {
+    const lineupPlayers = collectLineupPlayers(root[side.key]);
+    const missing = lineupPlayers.filter((player) => !goalPortraitOf(player));
+    if (!missing.length) continue;
+    const squad = await apiFootballSquad(side.teamId);
+    if (!squad) continue;
+    const { assignments, stats } = await fallbackAssignments(missing, squad);
+    for (const [player, url] of assignments) allAssignments.set(player, url);
+    applied += stats.applied;
+  }
+  const nextRoot = mapLineupPlayers(root, allAssignments);
+  const nextPayload = outer ? { ...payload, data: nextRoot } : nextRoot;
+  return { payload: nextPayload, meta: { configured: Boolean(API_FOOTBALL_API_KEY), applied } };
+}
+
+function fixtureRowsOf(payload, depth = 0) {
+  if (Array.isArray(payload)) return payload;
+  if (!payload || typeof payload !== 'object' || depth > 6) return [];
+  for (const key of ['fixtures', 'matches', 'items', 'results', 'data']) {
+    if (Array.isArray(payload[key])) return payload[key];
+  }
+  for (const key of ['data', 'result', 'response']) {
+    const rows = fixtureRowsOf(payload[key], depth + 1);
+    if (rows.length) return rows;
+  }
+  return [];
+}
+
+async function seasonFixtureHistory(season, to) {
+  const from = `${season}-07-01`;
+  const pageSize = 100;
+  const pages = [];
+  let complete = false;
+  for (let page = 0; page < 12; page += 1) {
+    const offset = page * pageSize;
+    const query = new URLSearchParams({ leagueId: LEAGUE_ID, from, to, limit: String(pageSize), offset: String(offset) }).toString();
+    const payload = await goalGet(`/fixtures?${query}`, 5 * 60_000);
+    const rows = fixtureRowsOf(payload);
+    pages.push(...rows);
+    if (rows.length < pageSize) { complete = true; break; }
+  }
+  return { rows: pages, complete, from, to };
+}
+
+const server = http.createServer(async (req, res) => {
+  const url = new URL(req.url || '/', `http://${req.headers.host || 'localhost'}`);
+  if (req.method !== 'GET') return send(res, 405, { error: 'Method not allowed' });
+  if (url.pathname === '/api/status') return send(res, 200, {
+    configured: Boolean(GOAL_API_KEY), provider: 'GOAL API', leagueId: LEAGUE_ID,
+    season: process.env.GOAL_RPL_SEASON || '2026',
+    portraitFallbackConfigured: Boolean(API_FOOTBALL_API_KEY), portraitFallbackProvider: 'API-Football'
+  });
+  if (url.pathname === '/api/live-stream') {
+    res.writeHead(200, { 'Content-Type': 'text/event-stream; charset=utf-8', 'Cache-Control': 'no-cache, no-transform', Connection: 'keep-alive', 'X-Accel-Buffering': 'no' });
+    res.write(': connected\n\n');
+    liveStreamClients.add(res);
+    res.write(`event: state\ndata: ${JSON.stringify(goalLiveState)}\n\n`);
+    const heartbeat = setInterval(() => { if (!res.destroyed) res.write(': ping\n\n'); }, 25_000);
+    res.on('close', () => { clearInterval(heartbeat); liveStreamClients.delete(res); });
+    return;
+  }
+  if (url.pathname === '/api/rpl') {
+    if (!GOAL_API_KEY) return send(res, 503, { error: 'GOAL_API_KEY is not configured' });
+    const season = url.searchParams.get('season') || process.env.GOAL_RPL_SEASON || '2026';
+    if (!/^20\d{2}$/.test(season)) return send(res, 400, { error: 'Season must be a four-digit year' });
+    const today = moscowDay();
+    const from = `${season}-07-01`;
+    const to = shiftDay(today, 30);
+    try {
+      const [history, standings] = await Promise.all([
+        seasonFixtureHistory(season, to),
+        goalGet(`/leagues/${encodeURIComponent(LEAGUE_ID)}/standings?season=${encodeURIComponent(season)}`, 15 * 60_000)
+      ]);
+      const fixtures = { data: history.rows };
+      rememberFixtures(fixtures);
+      rememberStandingsTeams(standings);
+      syncGoalLiveSocket(history.rows);
+      return send(res, 200, { fixtures, standings, provider: 'GOAL API', leagueId: LEAGUE_ID, season, range: { from: history.from, to: history.to }, fixtureHistoryComplete: history.complete, fetchedAt: new Date().toISOString() });
+    } catch (error) {
+      console.error('GOAL API request failed:', error.message);
+      return send(res, 502, { error: 'Не удалось загрузить данные GOAL API', status: error.status || 502 });
+    }
+  }
+  const rosterMatch = url.pathname.match(/^\/api\/teams\/([a-zA-Z0-9_-]{1,64})\/players$/);
+  if (rosterMatch) {
+    if (!GOAL_API_KEY) return send(res, 503, { error: 'GOAL_API_KEY is not configured' });
+    const teamId = rosterMatch[1];
+    if (!knownTeams.has(teamId)) return send(res, 404, { error: 'Unknown RPL team' });
+    try {
+      const payload = await goalGet(`/teams/${encodeURIComponent(teamId)}/players`, 6 * 60 * 60_000);
+      const enriched = await enrichRoster(teamId, payload);
+      return send(res, 200, { ...enriched.payload, portraitFallback: enriched.meta });
+    } catch (error) {
+      console.error('GOAL API roster request failed:', error.message);
+      return send(res, 502, { error: 'Не удалось загрузить состав команды', status: error.status || 502 });
+    }
+  }
+  const lineupMatch = url.pathname.match(/^\/api\/fixtures\/([a-zA-Z0-9_-]{1,64})\/lineups$/);
+  if (lineupMatch) {
+    if (!GOAL_API_KEY) return send(res, 503, { error: 'GOAL_API_KEY is not configured' });
+    const fixtureId = lineupMatch[1];
+    const fixture = knownFixtures.get(fixtureId);
+    if (!fixture) return send(res, 404, { error: 'Unknown RPL fixture' });
+    const finished = /FINISHED|COMPLETE|ENDED|FT/.test(fixture.status);
+    try {
+      const payload = await goalGet(`/fixtures/${encodeURIComponent(fixtureId)}/lineups`, finished ? 24 * 60 * 60_000 : 10 * 60_000);
+      const enriched = await enrichLineups(payload, fixture);
+      return send(res, 200, { ...enriched.payload, portraitFallback: enriched.meta });
+    } catch (error) {
+      console.error('GOAL API lineup request failed:', error.message);
+      return send(res, 502, { error: 'Не удалось загрузить составы матча', status: error.status || 502 });
+    }
+  }
+  const matchDataRoute = url.pathname.match(/^\/api\/fixtures\/([a-zA-Z0-9_-]{1,64})\/(events|statistics)$/);
+  if (matchDataRoute) {
+    if (!GOAL_API_KEY) return send(res, 503, { error: 'GOAL_API_KEY is not configured' });
+    const fixtureId = matchDataRoute[1];
+    const resource = matchDataRoute[2];
+    const fixture = knownFixtures.get(fixtureId);
+    if (!fixture) return send(res, 404, { error: 'Unknown RPL fixture' });
+    const status = String(fixture.status || '').toUpperCase();
+    const finished = /FINISHED|COMPLETE|ENDED|FT/.test(status);
+    const live = /LIVE|PLAY|IN.?PROGRESS|1H|2H|HALF.?TIME|HT/.test(status);
+    const ttl = finished ? 24 * 60 * 60_000 : live ? 60_000 : 10 * 60_000;
+    try {
+      const payload = await goalGet(`/fixtures/${encodeURIComponent(fixtureId)}/${resource}`, ttl);
+      return send(res, 200, payload);
+    } catch (error) {
+      console.error(`GOAL API fixture ${resource} request failed:`, error.message);
+      return send(res, 502, { error: resource === 'events' ? 'Не удалось загрузить события матча' : 'Не удалось загрузить статистику матча', status: error.status || 502 });
+    }
+  }
+  const file = resolvePath(url.pathname);
+  if (!file) return send(res, 403, { error: 'Forbidden' });
+  try {
+    const info = await stat(file); if (!info.isFile()) return send(res, 404, { error: 'Not found' });
+    const body = await readFile(file); const ext = path.extname(file).toLowerCase();
+    return send(res, 200, body, MIME[ext] || 'application/octet-stream', { 'Cache-Control': ext === '.html' ? 'no-cache' : 'public, max-age=300' });
+  } catch { return send(res, 404, { error: 'Not found' }); }
+});
+server.listen(PORT, '0.0.0.0', () => {
+  console.log(`ТЕМП is running on http://0.0.0.0:${PORT}`);
+  console.log(`GOAL API: ${GOAL_API_KEY ? 'configured (key hidden)' : 'not configured — demo mode'}`);
+  console.log(`API-Football portrait fallback: ${API_FOOTBALL_API_KEY ? 'configured (key hidden)' : 'not configured'}`);
+});

@@ -1,0 +1,11 @@
+{
+  "name": "temp-rpl-mvp",
+  "version": "0.1.1",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "start": "node server.mjs",
+    "check": "node --check server.mjs && node --check goal-data.js && node --check assets/goal-insights.js && node --check assets/season-analytics.js && node --check assets/ui-polish.js && node --check assets/detail-screens.js && node --check service-worker.js",
+    "test": "node --test tests/*.test.mjs"
+  }
+}
