@@ -38,25 +38,33 @@
     const home = standingFor(match.home); const away = standingFor(match.away);
     if (!home && !away) return '<div class="empty-note">Таблица текущего сезона не пришла от поставщика.</div>';
     const analytics = window.rplSeasonAnalytics;
-    const homeVenue = analytics?.teamSplits(matches, match.home).home;
-    const awayVenue = analytics?.teamSplits(matches, match.away).away;
+    const homeSplits = analytics?.teamSplits(matches, match.home);
+    const awaySplits = analytics?.teamSplits(matches, match.away);
     const rate = (row) => Number(row?.[1]) ? ((Number(String(row[5] || '0–0').split('–')[0]) || 0) / Number(row[1])).toFixed(2).replace('.', ',') : '—';
     const record = (split) => split?.played ? `${split.won}–${split.drawn}–${split.lost}` : '—';
+    const homeRank = teamRank(match.home); const awayRank = teamRank(match.away);
+    const homePoints = Number(home?.[6]) || 0; const awayPoints = Number(away?.[6]) || 0;
+    const homeRate = Number(rate(home).replace(',', '.')) || 0; const awayRate = Number(rate(away).replace(',', '.')) || 0;
+    const metric = (label, left, right, leftNumber, rightNumber) => {
+      const max = Math.max(leftNumber, rightNumber, 0);
+      const leftWidth = max ? leftNumber / max * 100 : 0;
+      const rightWidth = max ? rightNumber / max * 100 : 0;
+      return `<div class="season-duel-metric"><div class="season-duel-values"><b>${escape(left)}</b><span>${label}</span><b>${escape(right)}</b></div><div class="season-duel-bars" aria-hidden="true"><span class="season-duel-bar home"><i style="width:${leftWidth}%"></i></span><span class="season-duel-bar away"><i style="width:${rightWidth}%"></i></span></div></div>`;
+    };
     const rows = [
-      ['Место', home ? `${teamRank(match.home) || '—'}` : '—', away ? `${teamRank(match.away) || '—'}` : '—'],
-      ['Очки', home?.[6] ?? '—', away?.[6] ?? '—'],
       ['Матчи', home?.[1] ?? '—', away?.[1] ?? '—'],
-      ['В–Н–П', home ? `${home[2]}–${home[3]}–${home[4]}` : '—', away ? `${away[2]}–${away[3]}–${away[4]}` : '—'],
-      ['Мячи', home?.[5] ?? '—', away?.[5] ?? '—'],
-      ['Разница', home ? `${goalDifference(home) > 0 ? '+' : ''}${goalDifference(home)}` : '—', away ? `${goalDifference(away) > 0 ? '+' : ''}${goalDifference(away)}` : '—'],
-      ['Голов за матч', rate(home), rate(away)],
-      ['Дом / гость · В–Н–П', record(homeVenue), record(awayVenue)]
+      ['Победы · ничьи · поражения', home ? `${home[2]}–${home[3]}–${home[4]}` : '—', away ? `${away[2]}–${away[3]}–${away[4]}` : '—'],
+      ['Забито · пропущено', home?.[5] ?? '—', away?.[5] ?? '—'],
+      ['Разница мячей', home ? `${goalDifference(home) > 0 ? '+' : ''}${goalDifference(home)}` : '—', away ? `${goalDifference(away) > 0 ? '+' : ''}${goalDifference(away)}` : '—'],
+      ['Дома · В–Н–П', record(homeSplits?.home), record(awaySplits?.home)],
+      ['В гостях · В–Н–П', record(homeSplits?.away), record(awaySplits?.away)]
     ];
     return `<section class="detail-card season-compare-card" id="season-comparison" aria-label="Сравнение команд в таблице сезона">
-      <div class="detail-section-head"><div><span class="detail-kicker">СЕЗОН 2026/27</span><h2>Таблица и цифры</h2></div><span class="detail-source">${detailSource()}</span></div>
-      <div class="compare-team-head"><span></span><button type="button" data-detail-club="${escape(match.home)}">${clubBadge(match.home, 'compare-crest')}<strong>${escape(teamLabel(match.home))}</strong></button><button type="button" data-detail-club="${escape(match.away)}">${clubBadge(match.away, 'compare-crest')}<strong>${escape(teamLabel(match.away))}</strong></button></div>
-      <div class="compare-season-rows">${rows.map(([label, homeValue, awayValue]) => `<div class="compare-season-row"><span>${label}</span><b>${escape(homeValue)}</b><b>${escape(awayValue)}</b></div>`).join('')}</div>
-      <p class="detail-footnote">Позиции и общие показатели — из таблицы сезона; разрез дома/в гостях вычислен только по завершённым матчам в загруженной истории.</p>
+      <div class="detail-section-head"><div><span class="detail-kicker">СЕЗОН 2026/27 · ТУРНИР</span><h2>Сезон команд</h2></div><span class="detail-source">${detailSource()}</span></div>
+      <div class="season-duel-teams"><button type="button" data-detail-club="${escape(match.home)}">${clubBadge(match.home, 'compare-crest')}<strong>${escape(teamLabel(match.home))}</strong><small>№ ${homeRank || '—'} · ${home?.[6] ?? '—'} очков</small></button><button type="button" data-detail-club="${escape(match.away)}">${clubBadge(match.away, 'compare-crest')}<strong>${escape(teamLabel(match.away))}</strong><small>№ ${awayRank || '—'} · ${away?.[6] ?? '—'} очков</small></button></div>
+      <div class="season-duel-chart">${metric('Очки', home?.[6] ?? '—', away?.[6] ?? '—', homePoints, awayPoints)}${metric('Голов за матч', rate(home), rate(away), homeRate, awayRate)}</div>
+      <div class="season-facts">${rows.map(([label, homeValue, awayValue]) => `<div class="season-fact-row"><span>${label}</span><b>${escape(homeValue)}</b><b>${escape(awayValue)}</b></div>`).join('')}</div>
+      <p class="detail-footnote">Место и общие показатели — из таблицы сезона. Домашние и гостевые разрезы учитывают только завершённые матчи в загруженной истории.</p>
     </section>`;
   }
   function headToHead(match) {
@@ -95,7 +103,38 @@
       const message = match.status === 'soon' ? 'До стартового свистка событий матча ещё нет.' : state === 'failed' ? 'Не удалось получить события GOAL API. Попробуйте открыть матч позже.' : state === 'empty' ? 'GOAL API не передал события для этого матча.' : 'События не пришли в текущем ответе поставщика.';
       return `<div class="empty-note">${message}</div>`;
     }
-    return `<div class="detail-events">${events.map((event) => `<div class="detail-event"><time>${escape(event[0])}</time><span>${escape(event[1])}</span><small>${escape(event[2])}</small></div>`).join('')}</div>`;
+    const minuteValue = (value) => {
+      const found = String(value || '').match(/(\d+)(?:\s*\+\s*(\d+))?/);
+      return found ? Number(found[1]) + Number(found[2] || 0) / 100 : null;
+    };
+    const ordered = events.map((event, index) => ({ event, index, minute: minuteValue(event[0]) }));
+    if (ordered.every((item) => item.minute !== null)) ordered.sort((a, b) => a.minute - b.minute || a.index - b.index);
+    const home = clubs[match.home] || {}; const away = clubs[match.away] || {};
+    const belongsTo = (team, key) => {
+      const label = String(team || '').toLocaleLowerCase('ru-RU');
+      const club = clubs[key] || {};
+      return Boolean(label) && [club.short, club.name].filter(Boolean).some((name) => {
+        const normalized = String(name).toLocaleLowerCase('ru-RU');
+        return label.includes(normalized) || normalized.includes(label);
+      });
+    };
+    const kindOf = (text) => /гол|goal|пенальти|автогол/i.test(text) ? 'goal' : /красн|удалени|red card/i.test(text) ? 'red-card' : /ж[её]лт|yellow card/i.test(text) ? 'yellow-card' : /замен|substitution/i.test(text) ? 'substitution' : 'event';
+    const showHalves = ordered.every((item) => item.minute !== null) && ordered.some((item) => item.minute < 46) && ordered.some((item) => item.minute >= 46);
+    const list = [];
+    if (showHalves) list.push('<li class="timeline-period"><span>Первый тайм</span></li>');
+    let markedSecondHalf = false;
+    ordered.forEach(({ event, minute }) => {
+      if (showHalves && !markedSecondHalf && minute >= 46) {
+        list.push('<li class="timeline-period"><span>Второй тайм</span></li>');
+        markedSecondHalf = true;
+      }
+      const isHome = belongsTo(event[2], match.home); const isAway = !isHome && belongsTo(event[2], match.away);
+      const side = isHome ? 'home' : isAway ? 'away' : 'unknown';
+      const kind = kindOf(String(event[1] || ''));
+      const team = isHome ? (home.short || home.name) : isAway ? (away.short || away.name) : event[2];
+      list.push(`<li class="timeline-event ${side} event-${kind}"><div class="timeline-event-copy"><small>${escape(team || 'Матч')}</small><span>${escape(event[1])}</span></div><time>${escape(event[0])}</time></li>`);
+    });
+    return `<ol class="match-timeline" aria-label="События матча по времени">${list.join('')}</ol>`;
   }
   function matchStats(match) {
     if (match.status === 'soon') return '<div class="empty-note">Статистика появится после стартового свистка. Предматчевые нули здесь не показываем.</div>';
@@ -104,13 +143,20 @@
       const state = match.detailDataStatus?.statistics;
       return `<div class="empty-note">${state === 'failed' ? 'Не удалось получить статистику GOAL API. Попробуйте открыть матч позже.' : state === 'empty' ? 'GOAL API не передал статистику для этого матча.' : 'Показатели матча не пришли в ответе поставщика.'}</div>`;
     }
-    return `<div class="match-stats-list">${stats.map(([label, home, away, homeValue, awayValue]) => {
-      const homeNumber = Number.isFinite(Number(homeValue)) ? Number(homeValue) : Number(home) || 0;
-      const awayNumber = Number.isFinite(Number(awayValue)) ? Number(awayValue) : Number(away) || 0;
-      const sum = Math.max(0, homeNumber) + Math.max(0, awayNumber);
-      const homeShare = sum ? Math.max(0, homeNumber) / sum * 100 : 50;
-      return `<div class="match-stat-row"><div><b>${escape(home)}</b><span>${escape(label)}</span><b>${escape(away)}</b></div><div class="match-stat-track"><i style="width:${homeShare}%"></i></div></div>`;
-    }).join('')}</div><p class="detail-footnote">${window.isLiveData ? 'Показаны только значения, переданные поставщиком для этого матча.' : 'Демо-значения для проверки интерфейса, не live-данные.'}</p>`;
+    const numeric = (value) => {
+      const token = String(value ?? '').replace(/,/g, '.').match(/[+-]?(?:\d+(?:\.\d+)?|\.\d+)/);
+      return token ? Number(token[0]) : 0;
+    };
+    const home = clubs[match.home] || {}; const away = clubs[match.away] || {};
+    const legend = `<div class="match-stats-legend"><span><i class="home"></i>${escape(home.short || home.name || 'Хозяева')}</span><span><i class="away"></i>${escape(away.short || away.name || 'Гости')}</span></div>`;
+    const rows = stats.map(([label, homeValue, awayValue, homeRaw, awayRaw]) => {
+      const homeNumber = numeric(homeRaw ?? homeValue); const awayNumber = numeric(awayRaw ?? awayValue);
+      const max = Math.max(homeNumber, awayNumber, 0);
+      const homeWidth = max ? Math.max(0, homeNumber) / max * 100 : 0;
+      const awayWidth = max ? Math.max(0, awayNumber) / max * 100 : 0;
+      return `<div class="match-stat-row"><div class="match-stat-values"><b>${escape(homeValue)}</b><span>${escape(label)}</span><b>${escape(awayValue)}</b></div><div class="match-stat-bars" aria-hidden="true"><span class="match-stat-track home"><i style="width:${homeWidth}%"></i></span><span class="match-stat-track away"><i style="width:${awayWidth}%"></i></span></div></div>`;
+    }).join('');
+    return `${legend}<div class="match-stats-list">${rows}</div><p class="detail-footnote">Длина шкалы в каждой строке показывает соотношение значений этого показателя. ${window.isLiveData ? 'Числа переданы поставщиком для этого матча.' : 'Демо-значения для проверки интерфейса, не live-данные.'}</p>`;
   }
   function matchPage(match) {
     const home = clubs[match.home] || {}; const away = clubs[match.away] || {};
@@ -118,6 +164,9 @@
     const matchTime = match.status === 'soon' ? (String(match.time || '').match(/(\d{1,2}:\d{2})/)?.[1] || (/^\d{1,2}:\d{2}$/.test(String(match.score || '')) ? String(match.score) : '')) : '';
     const status = match.status === 'soon' ? (matchTime ? `Начало · ${matchTime}` : 'Время уточняется') : match.status === 'live' ? `Идёт · ${match.time}` : 'Завершён';
     const standingsCaption = [teamRank(match.home) && `${teamRank(match.home)}-е место`, teamRank(match.away) && `${teamRank(match.away)}-е место`].filter(Boolean).join(' · ');
+    const eventCount = Array.isArray(match.events) ? match.events.length : 0;
+    const eventCountMod100 = eventCount % 100; const eventCountMod10 = eventCount % 10;
+    const eventCountLabel = eventCount ? `${eventCount} ${eventCountMod100 >= 11 && eventCountMod100 <= 14 ? 'событий' : eventCountMod10 === 1 ? 'событие' : eventCountMod10 >= 2 && eventCountMod10 <= 4 ? 'события' : 'событий'}` : detailSource();
     return `<div class="detail-page match-detail-page">
       <div class="detail-toolbar"><button type="button" class="detail-back" data-detail-back>← <span>Назад</span></button><span class="detail-toolbar-label">МАТЧ · ТУР ${escape(match.round || '—')}</span><button type="button" class="detail-star ${favoriteMatches.has(String(match.id)) ? 'selected' : ''}" data-detail-favorite="${escape(match.id)}" aria-label="${favoriteMatches.has(String(match.id)) ? 'Убрать матч из избранного' : 'Добавить матч в избранное'}">☆</button></div>
       <header class="match-detail-hero"><div class="detail-kicker">РПЛ · ${escape(dateLabel)}${matchTime ? ` · ${escape(matchTime)}` : ''}</div><div class="match-detail-teams"><button type="button" class="detail-team-link" data-detail-club="${escape(match.home)}">${clubBadge(match.home, 'detail-team-crest')}<strong>${escape(home.short || home.name || 'Хозяева')}</strong><small>${escape(home.city || 'Россия')}</small></button><div class="match-detail-score"><span>${escape(match.status === 'soon' ? '—' : match.score || '—')}</span><small>${escape(status)}</small></div><button type="button" class="detail-team-link away" data-detail-club="${escape(match.away)}">${clubBadge(match.away, 'detail-team-crest')}<strong>${escape(away.short || away.name || 'Гости')}</strong><small>${escape(away.city || 'Россия')}</small></button></div><div class="match-detail-venue"><span>${escape(match.venue || 'Стадион не указан')}</span><small>${escape(detailSource())}</small></div></header>
@@ -126,8 +175,8 @@
       ${seasonCompare(match)}
       ${headToHead(match)}
       <section class="detail-card form-card" id="match-form"><div class="detail-section-head"><div><span class="detail-kicker">ПОСЛЕДНИЕ ЗАВЕРШЁННЫЕ</span><h2>Форма команд</h2></div><span class="detail-source">ДО 5 ИГР</span></div><div class="match-form-grid">${formTeam(match.home)}${formTeam(match.away)}</div><div class="form-legend" aria-label="В означает победа, Н означает ничья, П означает поражение"><span><i class="win">В</i> Победа</span><span><i class="draw">Н</i> Ничья</span><span><i class="loss">П</i> Поражение</span></div></section>
-      <section class="detail-card" id="match-events"><div class="detail-section-head"><div><span class="detail-kicker">ХОД МАТЧА</span><h2>События</h2></div></div>${eventList(match)}</section>
-      <section class="detail-card" id="match-statistics"><div class="detail-section-head"><div><span class="detail-kicker">${match.status === 'soon' ? 'ПОСЛЕ СТАРТА' : 'ПО МАТЧУ'}</span><h2>Статистика матча</h2></div></div>${matchStats(match)}</section>
+      <section class="detail-card match-events-card" id="match-events"><div class="detail-section-head"><div><span class="detail-kicker">ХОД МАТЧА</span><h2>Хронология</h2></div><span class="detail-source">${eventCountLabel}</span></div>${eventList(match)}</section>
+      <section class="detail-card match-stats-card" id="match-statistics"><div class="detail-section-head"><div><span class="detail-kicker">${match.status === 'soon' ? 'ПОСЛЕ СТАРТА' : 'ПО МАТЧУ'}</span><h2>Статистика матча</h2></div></div>${matchStats(match)}</section>
       <p class="detail-data-note">${window.isLiveData ? `Источник: GOAL API · актуальность ${escape(window.dataFreshAt ? new Intl.DateTimeFormat('ru-RU', { day: 'numeric', month: 'short', hour: '2-digit', minute: '2-digit' }).format(new Date(window.dataFreshAt)) : 'при последнем обновлении')}. ${escape(standingsCaption)}` : 'Это демонстрационный экран. Расписание и результаты в демо-режиме не являются фактическими данными.'}</p>
     </div>`;
   }

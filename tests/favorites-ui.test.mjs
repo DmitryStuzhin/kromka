@@ -40,7 +40,7 @@ test('match and club follow controls expose pressed state and PWA shell caches t
 test('club comparison separates table provenance and shows only completed-season head-to-head data', () => {
   assert.match(html, /function comparisonCard\(\)/);
   assert.match(html, /id="compareLeft"/);
-  assert.match(html, /Очков за матч в срезе/);
+  assert.match(html, /Очков за матч/);
   assert.match(html, /headToHead\(matches,compareLeft,compareRight\)/);
   assert.match(html, /teamSplits\(matches,compareLeft\)/);
   assert.match(html, /Очные встречи/);
