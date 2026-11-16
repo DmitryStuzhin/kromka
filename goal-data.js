@@ -243,8 +243,8 @@
   function liveMatchesPage() {
     const withinWeek = matches.filter((m) => m.dateKey && m.dateKey >= calendarDates[0] && m.dateKey <= calendarDates[6]).sort((a, b) => a.dateKey.localeCompare(b.dateKey) || String(a.score).localeCompare(String(b.score)));
     const clubMatches = withinWeek.filter((m) => filterClub === 'all' || m.home === filterClub || m.away === filterClub);
-    const visible = clubMatches.filter((m) => matchScope === 'live' ? m.status === 'live' : matchScope === 'favorites' ? matchIsFollowed(m) : true);
-    const scopes = [['all', 'Все', clubMatches.length], ['live', 'Live', clubMatches.filter((m) => m.status === 'live').length], ['favorites', 'Избранное', clubMatches.filter(matchIsFollowed).length]];
+    const visible = clubMatches.filter((m) => matchScope === 'live' ? m.status === 'live' : matchScope === 'soon' ? m.status === 'soon' : matchScope === 'favorites' ? matchIsFollowed(m) : true);
+    const scopes = [['all', 'Все', clubMatches.length], ['live', 'В эфире', clubMatches.filter((m) => m.status === 'live').length], ['soon', 'Скоро', clubMatches.filter((m) => m.status === 'soon').length], ['favorites', 'Избранное', clubMatches.filter(matchIsFollowed).length]];
     const sections = calendarDates.map((iso) => {
       const rows = visible.filter((m) => m.dateKey === iso); const hasFixtures = clubMatches.some((m) => m.dateKey === iso); const count = rows.length;
       const rawHeading = fmtDate(iso, { weekday: 'long', day: 'numeric', month: 'long' }); const heading = safe(rawHeading.charAt(0).toLocaleUpperCase('ru-RU') + rawHeading.slice(1));

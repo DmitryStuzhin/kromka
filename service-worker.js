@@ -1,6 +1,6 @@
-const CACHE = 'temp-rpl-shell-v13-match-data';
+const CACHE = 'temp-rpl-shell-v14-concept-views';
 const SHELL = [
-  '/', '/manifest.json', '/assets/goal-insights.js?v=goal-insights-20261111', '/goal-data.js?v=match-insights-20261111-live-ws', '/assets/live-data.css?v=dynamo-crest-20261102b', '/assets/ui-polish.css', '/assets/ui-polish.js', '/assets/season-analytics.js?v=season-h2h-splits-20261111', '/assets/unslop.css', '/assets/detail-screens.css', '/assets/detail-data.css?v=match-data-20261114', '/assets/detail-screens.js', '/assets/tempo-emblem.png',
+  '/', '/manifest.json', '/assets/goal-insights.js?v=goal-insights-20261111', '/goal-data.js?v=match-insights-20261111-live-ws', '/assets/live-data.css?v=dynamo-crest-20261102b', '/assets/ui-polish.css', '/assets/ui-polish.js', '/assets/season-analytics.js?v=season-h2h-splits-20261111', '/assets/unslop.css', '/assets/detail-screens.css', '/assets/detail-data.css?v=match-data-20261114', '/assets/detail-screens.js', '/assets/concept-views.css?v=concept-views-20261116', '/assets/concept-views.js?v=concept-views-20261116', '/assets/tempo-emblem.png',
   '/assets/icon-192.png', '/assets/icon-512.png', '/assets/apple-touch-icon.png',
   '/assets/krestovsky-night.jpg', '/assets/club-crests/dynamo-moscow.svg'
 ];
