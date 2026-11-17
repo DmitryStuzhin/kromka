@@ -41,8 +41,9 @@
       const player = nameOf(event.player || event.scorer || event.athlete);
       const kind = plain(event.type?.name || event.type || event.detail || event.name || 'Событие');
       const text = plain(event.description || [kind, player].filter(Boolean).join(' · '));
-      const minuteLabel = String(minute).includes('′') ? minute : `${minute}′`;
-      return [safe(minuteLabel), safe(text || 'Событие'), safe(nameOf(event.team || event.club))];
+      const minuteText = String(minute).trim();
+      const minuteLabel = /\d/.test(minuteText) ? minuteText.replace(/\s*['’′]+$/, '') + '′' : minuteText;
+      return [minuteLabel, text || 'Событие', plain(nameOf(event.team || event.club))];
     });
   }
   function toStats(item) {

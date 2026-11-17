@@ -4,14 +4,16 @@ import '../assets/goal-insights.js';
 
 const insights = globalThis.rplMatchInsights;
 
-test('event normalization accepts nested GOAL-style payloads and escapes rendered text', () => {
+test('event normalization preserves text and canonicalizes Flashscore minute marks', () => {
   const rows = insights.normalizeEventsPayload({ data: { events: [
     { minute: 17, type: { name: 'Гол' }, player: { name: 'Иван' }, team: { name: 'Зенит & Ко' }, description: 'Гол & ассист' },
-    { time: { elapsed: 64 }, description: '<b>Пенальти</b>', club: { name: 'Спартак' } }
+    { time: { elapsed: 64 }, description: '<b>Пенальти</b>', club: { name: 'Спартак' } },
+    { minute: "90+1'", description: 'Гол' },
   ] } });
   assert.deepEqual(rows, [
-    ['17′', 'Гол &amp; ассист', 'Зенит &amp; Ко'],
-    ['64′', 'Пенальти', 'Спартак']
+    ['17′', 'Гол & ассист', 'Зенит & Ко'],
+    ['64′', 'Пенальти', 'Спартак'],
+    ['90+1′', 'Гол', ''],
   ]);
 });
 

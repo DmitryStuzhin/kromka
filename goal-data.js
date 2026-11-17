@@ -111,7 +111,11 @@
     if (['finished', 'full_time', 'fulltime', 'complete', 'completed', 'ft', 'ended'].some((x) => s.includes(x))) return 'finished';
     return 'soon';
   }
-  function roundOf(value) { if (value && typeof value === 'object') value = value.name || value.round || value.number || value.matchday || ''; const found = String(value ?? '').match(/\d+/g); return found?.length ? Number(found[found.length - 1]) : (window.apiRound || 13); }
+  function roundOf(value) {
+    const label = value && typeof value === 'object' ? value.number ?? value.matchday ?? value.round ?? value.name : value;
+    const round = Number(String(label ?? '').trim().match(/^(?:(?:round|matchday|тур)\s*[-: ]?\s*)?(\d{1,2})$/iu)?.[1]);
+    return round >= 1 && round <= 30 ? round : null;
+  }
   const toEvents = (item) => window.rplMatchInsights?.toEvents(item) || [];
   const toStats = (item) => window.rplMatchInsights?.toStats(item) || [];
   const normalizeEventsPayload = (payload) => window.rplMatchInsights?.normalizeEventsPayload(payload) || [];
@@ -128,9 +132,9 @@
     const clock = item.matchMinute ?? item.minute ?? item.elapsed ?? item.elapsedTime ?? item.clock?.displayValue ?? item.status?.elapsed;
     const minute = clock === undefined || clock === null || clock === '' ? 'LIVE' : `${String(clock).replace(/[^\d+]/g, '')}′`;
     const kick = dateRaw && String(dateRaw).includes('T') ? new Intl.DateTimeFormat('ru-RU', { hour: '2-digit', minute: '2-digit', timeZone: 'Europe/Moscow' }).format(new Date(dateRaw)) : String(item.matchTime || item.time || item.kickoffTime || item.kickoff_time || '').slice(0, 5);
-    const r = roundOf(item.matchRound || item.round || item.matchday || item.week || item.stage);
+    const r = roundOf(item.matchRound ?? item.round ?? item.matchday ?? item.week);
     const key = String(item.id || item.fixtureId || item.fixture_id || item.matchId || `goal-${index}`).replace(/[^a-zA-Z0-9_-]/g, '').slice(0, 64);
-    return { id: safe(key), day: calendarDates.indexOf(iso), round: r, date: safe(`${fmtDate(iso).toUpperCase()} · ТУР ${r}`), dateKey: iso, home, away, homeFormation: plain(item.homeTeamSystem || item.homeFormation || ''), awayFormation: plain(item.awayTeamSystem || item.awayFormation || ''), score: status === 'soon' ? (kick || 'ВРЕМЯ НЕ УКАЗАНО') : `${hs ?? '—'} : ${as ?? '—'}`, status, time: safe(status === 'live' ? minute : status === 'finished' ? 'ЗАВЕРШЁН' : `НАЧАЛО В ${kick || '—'}`), venue: safe(plain(item.matchStadium || item.venue?.name || item.venue?.fullName || item.stadium?.name || item.venue || '')), events: toEvents(item), stats: toStats(item) };
+    return { id: safe(key), day: calendarDates.indexOf(iso), round: r, date: safe(fmtDate(iso).toUpperCase() + (r ? ` · ТУР ${r}` : '')), dateKey: iso, kickoff: kick, home, away, homeFormation: plain(item.homeTeamSystem || item.homeFormation || ''), awayFormation: plain(item.awayTeamSystem || item.awayFormation || ''), score: status === 'soon' ? (kick || 'ВРЕМЯ НЕ УКАЗАНО') : `${hs ?? '—'} : ${as ?? '—'}`, status, time: safe(status === 'live' ? minute : status === 'finished' ? 'ЗАВЕРШЁН' : `НАЧАЛО В ${kick || '—'}`), venue: safe(plain(item.matchStadium || item.venue?.name || item.venue?.fullName || item.stadium?.name || item.venue || '')), events: toEvents(item), stats: toStats(item) };
   }
   function standing(row) {
     const source = row.team || row.club || row.participant || row;
@@ -143,27 +147,6 @@
     const ga = num(row.overallLeagueGA ?? row.goalsAgainst ?? row.goals_against ?? row.goalsConceded ?? row.ga ?? row.overall?.goalsAgainst ?? row.all?.goalsAgainst);
     const points = num(row.overallLeaguePTS ?? row.points ?? row.pts ?? row.score ?? row.pointsTotal);
     return [key, played, won, drawn, lost, `${gf}–${ga}`, points];
-  }
-  function makeCalendar() { const today = moscowDateKey(); setCalendarWeek(startOfWeek(today), today); }
-  function selectedIso() { return selectedDate; }
-  function syncData(payload) {
-    makeCalendar();
-    const fixtureRows = findArray(payload.fixtures || payload.matches || payload, ['fixtures', 'matches', 'items', 'results', 'data']);
-    const tableRows = findArray(payload.standings || {}, ['standings', 'table', 'entries', 'rows', 'data']);
-    if (!fixtureRows.length && !tableRows.length) throw new Error('Unexpected GOAL API response shape');
-    const nextMatches = fixtureRows.map(fixture).filter((m) => m.dateKey);
-    const nextStandings = tableRows.map(standing);
-    if (nextMatches.length) {
-      matches.splice(0, matches.length, ...nextMatches);
-      const active = nextMatches.find((m) => m.status === 'live') || nextMatches.find((m) => m.status === 'soon' && m.dateKey >= moscowDateKey()) || nextMatches[0];
-      window.apiRound = active?.round || 13;
-      round = window.apiRound;
-      if (active?.dateKey) setCalendarWeek(startOfWeek(active.dateKey), active.dateKey);
-    }
-    if (nextStandings.length) standings.splice(0, standings.length, ...nextStandings);
-    window.isLiveData = true;
-    window.dataFreshAt = payload.fetchedAt || new Date().toISOString();
-    setDataRibbon();
   }
   let liveEventSource = null;
   function dataProviderName() { return window.rplDataProvider || 'GOAL API'; }
@@ -228,29 +211,6 @@
       if (window.goalLiveStreamState === 'connected') window.goalLiveStreamState = 'reconnecting';
       setDataRibbon();
     });
-  }
-  function liveHome() {
-    const list = matches.filter((m) => m.dateKey === selectedIso());
-    const iso = selectedIso(); const label = fmtDate(iso, { day: 'numeric', month: 'long' });
-    const live = list.filter((m) => m.status === 'live').length; const upcoming = list.filter((m) => m.status === 'soon').length; const round = list[0]?.round; const roundLabel = round ? ` · тур ${round}` : '';
-    const weekday = fmtDate(iso, { weekday: 'long' });
-      return `<section class="hero"><span class="photo-credit">ФОТО: MONOKLON · CC BY 3.0</span><div class="hero-content"><div><div class="eyebrow">Сезон 26—27${roundLabel}</div><h1 class="hero-title">РПЛ.<br>День игры.</h1></div><div class="hero-bottom"><div class="hero-meta"><strong>${list.length} матч${list.length === 1 ? '' : list.length < 5 ? 'а' : 'ей'} в расписании</strong><br>${safe(label)} · ${safe(dataProviderName())}</div><button class="hero-cta" data-go="matches">Календарь&nbsp; ↗</button></div></div></section>
-      <div class="page-head"><div><div class="page-kicker">Календарь лиги</div><h2 class="page-title">${selectedIso() === moscowDateKey() ? 'Сегодня' : safe(label)}</h2></div><div class="page-date">${safe(weekday)}<br>${safe(fmtDate(iso, { day: '2-digit', month: 'long' }))}</div></div>${weekControls()}${dateRail()}
-      <div class="section-heading"><h2>${safe(label)}${roundLabel}</h2><span class="micro">Матчей: ${list.length}${live ? ` · ${live} в игре` : upcoming ? ` · ${upcoming} скоро` : ''}</span></div><div class="match-list">${list.length ? list.map(matchCard).join('') : `<div class="empty-note">На эту дату матчей нет в расписании ${safe(dataProviderName())}. Выберите другой день.</div>`}</div>
-      <div class="compact-banner"><div><span class="label">Положение · сезон 26—27</span><h3>Гонка за верх</h3><p>${standings[0] ? `${safe(clubs[standings[0][0]]?.short || 'Лидер')} лидирует по очкам` : 'Открой таблицу РПЛ'}</p></div><button class="hero-cta" data-go="table">Таблица ↗</button></div><div class="section-heading"><h2>Топ-4</h2><button class="link-button" data-go="table">Вся таблица ↗</button></div>${miniTable()}
-      <div class="callout" data-go="matches"><div class="callout-index">${round ?? '—'}</div><div><div class="callout-title">${round ? 'Тур в фокусе' : 'Календарь РПЛ'}</div><div class="callout-sub">${round ? 'Матчи и таблица РПЛ в одном месте' : 'Откройте календарь матчей по дням'}</div></div><div class="callout-arrow">↗</div></div><p class="footnote">Источники: календарь — ${safe(dataProviderName())}; таблица — ${safe(standingsProviderName())}. Права на спортивные данные и эмблемы нужно отдельно подтвердить перед публичным релизом.</p>`;
-  }
-  function liveMatchesPage() {
-    const withinWeek = matches.filter((m) => m.dateKey && m.dateKey >= calendarDates[0] && m.dateKey <= calendarDates[6]).sort((a, b) => a.dateKey.localeCompare(b.dateKey) || String(a.score).localeCompare(String(b.score)));
-    const clubMatches = withinWeek.filter((m) => filterClub === 'all' || m.home === filterClub || m.away === filterClub);
-    const visible = clubMatches.filter((m) => matchScope === 'live' ? m.status === 'live' : matchScope === 'soon' ? m.status === 'soon' : matchScope === 'favorites' ? matchIsFollowed(m) : true);
-    const scopes = [['all', 'Все', clubMatches.length], ['live', 'В эфире', clubMatches.filter((m) => m.status === 'live').length], ['soon', 'Скоро', clubMatches.filter((m) => m.status === 'soon').length], ['favorites', 'Избранное', clubMatches.filter(matchIsFollowed).length]];
-    const sections = calendarDates.map((iso) => {
-      const rows = visible.filter((m) => m.dateKey === iso); const hasFixtures = clubMatches.some((m) => m.dateKey === iso); const count = rows.length;
-      const rawHeading = fmtDate(iso, { weekday: 'long', day: 'numeric', month: 'long' }); const heading = safe(rawHeading.charAt(0).toLocaleUpperCase('ru-RU') + rawHeading.slice(1));
-      return `<section class="calendar-day" id="calendar-${iso}"><div class="fixture-day"><strong>${heading}</strong><span>${count} ${count === 1 ? 'МАТЧ' : 'МАТЧЕЙ'}</span></div>${count ? `<div class="match-list">${rows.map(matchCard).join('')}</div>` : `<div class="empty-note calendar-empty">${hasFixtures ? 'По выбранным фильтрам матчей нет.' : `В расписании ${safe(dataProviderName())} на эту дату матчей нет.`}</div>`}</section>`;
-    }).join('');
-    return `<div class="page-head"><div><div class="page-kicker">РОССИЙСКАЯ ПРЕМЬЕР-ЛИГА · ${safe(dataProviderName())}</div><h1 class="page-title">Календарь</h1></div><div class="page-date">${visible.length} ${visible.length === 1 ? 'МАТЧ' : 'МАТЧЕЙ'}<br>ЗА НЕДЕЛЮ</div></div>${weekControls()}${dateRail()}<div class="match-scope-row" role="group" aria-label="Быстрые фильтры матчей">${scopes.map(([key, label, count]) => `<button class="match-scope-chip ${matchScope === key ? 'active' : ''}" data-match-scope="${key}" aria-pressed="${matchScope === key}"><span>${label}</span><small>${count}</small></button>`).join('')}</div><div class="filter-row"><button class="filter-chip ${filterClub === 'all' ? 'active' : ''}" data-filter="all">Все клубы</button>${Object.entries(clubs).map(([id, c]) => `<button class="filter-chip ${filterClub === id ? 'active' : ''}" data-filter="${safe(id)}">${safe(c.short)}</button>`).join('')}</div>${sections}<p class="footnote">Расписание и результаты получены из ${safe(dataProviderName())}. Дни без матчей показаны пустыми, без демо-игр. Избранное сохраняется в этом браузере.</p>`;
   }
   function liveTablePage() {
     return `<div class="page-head"><div><div class="page-kicker">СЕЗОН 2026/27 · ${safe(standingsProviderName())}</div><h1 class="page-title">Таблица</h1></div><div class="page-date">ОБЩАЯ<br>ТУРНИРНАЯ</div></div><div class="table-bar"><div class="table-title">РПЛ</div><div class="table-snapshot">ОБЩАЯ<br>ТУРНИРНАЯ</div></div><div class="table-wrap"><table class="standings"><thead><tr><th style="width:31px">№</th><th style="text-align:left">КЛУБ</th><th style="width:31px">И</th><th style="width:40px">Р/М</th><th style="width:42px">О</th></tr></thead><tbody>${standings.map((row, i) => `<tr class="${i < 4 ? 'top-zone' : i > standings.length - 3 ? 'bottom-zone' : ''} ${selectedClub === row[0] ? 'selected-row' : ''}" data-club-row="${safe(row[0])}"><td class="pos">${i + 1}</td><td class="club-cell"><div class="club-inline">${clubBadge(row[0])}<span class="club-name">${safe(clubs[row[0]]?.short || row[0])}</span></div></td><td>${safe(row[1])}</td><td>${safe(row[5])}</td><td class="points">${safe(row[6])}</td></tr>`).join('')}</tbody></table><div class="table-legend"><span class="legend-item"><i class="legend-marker"></i>Верхняя группа</span><span class="legend-item"><i class="legend-marker relegation"></i>Нижняя часть</span></div></div><p class="source-note">Положение и очки загружены через ${safe(standingsProviderName())}. ${standingsProviderName() === 'GOAL API' ? `Таблица кэшируется сервером. <a href="${API_COVERAGE}" target="_blank" rel="noreferrer">Покрытие РПЛ</a>.` : 'Таблица рассчитана из завершённых матчей сезона.'}</p><div class="section-heading"><h2>Лидер таблицы</h2><span class="micro">ПО ОЧКАМ</span></div><div class="data-tile"><b>${standings[0] ? safe(clubs[standings[0][0]]?.short || '—') : '—'}</b><span>${standings[0] ? `${safe(standings[0][6])} очков` : 'Данные пока не получены'}</span></div>${typeof comparisonCard === 'function' ? comparisonCard() : ''}`;
@@ -345,25 +305,39 @@
   function lineupsMarkup(payload, match) {
     const data = payload?.data || payload || {}; const home = data.home || data.homeTeam || {}; const away = data.away || data.awayTeam || {};
     const homeList = lineupLists(home).starters; const awayList = lineupLists(away).starters;
-    if (!homeList.length && !awayList.length) return '<div class="empty-note">Подтверждённые составы пока не опубликованы. Они появятся здесь, когда их передаст поставщик.</div>';
+    const kickoff = Date.parse(`${match.dateKey}T${fixtureKickoff(match)}:00+03:00`);
+    const canPredict = match.status === 'soon' && kickoff > Date.now();
+    const prediction = canPredict && payload?.prediction?.basis === 'season-league-minutes' ? payload.prediction : null;
+    if (!homeList.length && !awayList.length && !prediction) return `<div class="empty-note">${canPredict ? 'Составы пока не опубликованы. Данных для прогноза нет.' : 'Составы матча недоступны.'}</div>`;
     const fallbackPhotos = [...homeList, ...lineupLists(home).bench, ...awayList, ...lineupLists(away).bench].filter((player) => player.portraitSource === 'API-Football' && mediaUrl(player.image || player.playerImage || player.photo)).length;
     const provider = payload?.provider || data.provider || 'GOAL API';
-    const sourceNote = `<div class="portrait-source-note">Составы и схемы — ${safe(provider)}.${fallbackPhotos ? ` ${fallbackPhotos} резервных портрета API-Football.` : ''}</div>`;
-    return `${sourceNote}${teamLineupMarkup(home, match.home, data.homeFormation || match.homeFormation)}${teamLineupMarkup(away, match.away, data.awayFormation || match.awayFormation)}`;
+    const sourceNote = homeList.length || awayList.length
+      ? `<div class="portrait-source-note">Опубликованные составы — ${safe(provider)}.${fallbackPhotos ? ` ${fallbackPhotos} резервных портрета API-Football.` : ''}</div>` : '';
+    const team = (side, confirmed) => {
+      const key = match[side];
+      const projected = prediction?.[side];
+      if (lineupLists(confirmed).starters.length || !projected) return teamLineupMarkup(confirmed, key, data[`${side}Formation`] || match[`${side}Formation`]);
+      const roles = [['keepers','Вратарь'],['defenders','Защита'],['midfielders','Полузащита'],['forwards','Нападение']];
+      const players = lineupLists(projected).starters;
+      return `<section class="predicted-team"><header class="lineup-teamhead">${clubBadge(key, 'lineup-crest')}<strong>${safe(clubs[key]?.short || key)}</strong><span class="predicted-label">Прогноз · ${safe(projected.formation)}</span></header>${roles.map(([role,label]) => `<div class="predicted-role"><h3>${label}</h3><ul>${players.filter(p => playerGroup(p) === role).map(p => `<li><button type="button" ${playerProfileAttrs(p, key)}><span>${safe(playerName(p))}</span><small>${safe(p.minutes)} мин</small></button></li>`).join('')}</ul></div>`).join('')}</section>`;
+    };
+    const note = prediction ? '<p class="prediction-note">В каждой линии — игроки с наибольшим числом минут в сезоне РПЛ по данным Flashscore. Схема условная; травмы и дисквалификации не учитываются.</p>' : '';
+    return `${note}${sourceNote}${team('home',home)}${team('away',away)}`;
   }
   async function loadLineups(match) {
-    void loadMatchInsights(match);
     const root = document.getElementById('matchLineups'); if (!root) return;
-    if (lineupCache.has(match.id)) { root.setAttribute('aria-busy', 'false'); root.innerHTML = lineupsMarkup(lineupCache.get(match.id), match); return; }
+    const cached = lineupCache.get(match.id);
+    const status = match.status, ttl = status === 'finished' ? 24 * 60 * 60_000 : 60_000;
+    if (cached?.status === status && Date.now() - cached.at < ttl) { root.setAttribute('aria-busy', 'false'); root.innerHTML = lineupsMarkup(cached.payload, match); return; }
     if (lineupPending.has(match.id)) return;
     lineupPending.add(match.id);
     root.setAttribute('aria-busy', 'true');
-    root.innerHTML = loadingMarkup('Запрашиваю подтверждённые составы…', 4);
+    root.innerHTML = loadingMarkup('Загружаем составы…', 4);
     try {
       const response = await fetch(`/api/fixtures/${encodeURIComponent(match.id)}/lineups`, { cache: 'no-store' });
       if (!response.ok) throw new Error(`Lineups HTTP ${response.status}`);
-      const payload = await response.json(); lineupCache.set(match.id, payload);
-      const current = document.getElementById('matchLineups'); if (current && modalMatch?.id === match.id) { current.setAttribute('aria-busy', 'false'); current.innerHTML = lineupsMarkup(payload, match); }
+      const payload = await response.json(); lineupCache.set(match.id, { at: Date.now(), status, payload });
+      const current = document.getElementById('matchLineups'); if (current && modalMatch?.id === match.id) { current.setAttribute('aria-busy', 'false'); current.innerHTML = lineupsMarkup(payload, modalMatch); }
     } catch { const current = document.getElementById('matchLineups'); if (current && modalMatch?.id === match.id) { current.setAttribute('aria-busy', 'false'); current.innerHTML = '<div class="empty-note">Составы матча сейчас недоступны. Попробуйте позже.</div>'; } }
     finally { lineupPending.delete(match.id); }
   }
@@ -408,29 +382,15 @@
     finally { if (matchInsightsPending.get(id) === request) matchInsightsPending.delete(id); }
   }
   function liveClubPageRoster() {
-    const c = clubs[selectedClub] || clubs[Object.keys(clubs)[0]]; const idx = standings.findIndex((r) => r[0] === selectedClub); const row = idx >= 0 ? standings[idx] : null;
-    const clubKey = selectedClub; const teamMatches = matches.filter((m) => m.home === clubKey || m.away === clubKey); const next = teamMatches.find((m) => m.status === 'soon') || teamMatches.find((m) => m.status === 'live');
-    const goalDiff = row ? num(row[5].split('–')[0]) - num(row[5].split('–')[1]) : 0;
-    const overview = `<div class="section-heading"><h2>Следующий матч</h2><span class="micro">${next ? `ТУР ${next.round}` : 'НЕТ В РАСПИСАНИИ'}</span></div>${next ? matchCard(next) : '<div class="empty-note">Матч клуба не найден в текущей выдаче поставщика.</div>'}<div class="club-data"><div class="data-tile"><b>${row ? `${row[2]}–${row[3]}–${row[4]}` : '—'}</b><span>победы · ничьи · поражения</span></div><div class="data-tile"><b>${row ? `${goalDiff > 0 ? '+' : ''}${goalDiff}` : '—'}</b><span>разница мячей</span></div></div><div class="section-heading"><h2>Матчи клуба</h2><button class="link-button" data-go="matches">Календарь ↗</button></div><div class="match-list">${teamMatches.slice(0, 3).map(matchCard).join('') || '<div class="empty-note">Матчей пока нет в загруженном окне.</div>'}</div>`;
-    const calendar = `<div class="section-heading"><h2>Игры клуба</h2><span class="micro">${safe(dataProviderName())}</span></div><div class="match-list">${teamMatches.map(matchCard).join('') || '<div class="empty-note">Матчи не найдены.</div>'}</div>`;
-    const roster = `<div class="section-heading"><h2>Игроки</h2><span class="micro">СОСТАВ КОМАНДЫ</span></div><div id="clubSquad" class="club-squad">${squadCache.has(clubKey) ? rosterMarkup(squadCache.get(clubKey), squadMetaCache.get(clubKey), clubKey) : '<div class="empty-note">Загружаю состав…</div>'}</div>`;
-    const content = clubSection === 'календарь' ? calendar : clubSection === 'состав' ? roster : overview;
-    if (clubSection === 'состав') setTimeout(() => loadClubSquad(clubKey), 0);
-    return `<div class="page-head"><div><div class="page-kicker">МОЯ КОМАНДА · РПЛ</div><h1 class="page-title">Клуб</h1></div><button class="round-select" id="searchClubBtn">Сменить ↗</button></div><section class="club-hero"><div class="club-topline"><span class="club-chip">СЕЗОН 26—27${row ? ` / № ${idx + 1}` : ''}</span><button class="star ${favorites.has(clubKey) ? 'selected' : ''}" data-favorite-club="${safe(clubKey)}" aria-label="В избранное">☆</button></div><div class="club-identity">${clubBadge(clubKey)}<div><h1>${safe(c?.short || 'Клуб')}</h1><div class="club-city">${safe(c?.city || 'Россия')} · РОССИЯ</div></div></div><div class="club-stats"><div class="club-stat"><b>${row ? safe(row[6]) : '—'}</b><span>очков</span></div><div class="club-stat"><b>${row ? safe(row[1]) : '—'}</b><span>матчей</span></div><div class="club-stat"><b>${row ? safe(row[5]) : '—'}</b><span>мячи</span></div></div></section><div class="club-tabs">${[['обзор', 'обзор'], ['календарь', 'календарь'], ['состав', 'состав']].map(([value, label]) => `<button class="${clubSection === value ? 'active' : ''}" data-club-section="${value}">${label}</button>`).join('')}</div>${content}<p class="footnote">Составы и данные матча — ${safe(dataProviderName())}. ${goalRoleDescription()} Эмблема «Динамо Москва» — официальный файл клуба, остальные эмблемы — GOAL API. API-Football используется только как резерв для отсутствующих портретов. Если надёжного совпадения нет или изображение — общая заглушка, оставлены инициалы. Права на изображения обоих источников нужно подтвердить до публичного релиза.</p>`;
-  }
-  function liveClubPage() {
-    const c = clubs[selectedClub] || clubs[Object.keys(clubs)[0]]; const idx = standings.findIndex((r) => r[0] === selectedClub); const row = idx >= 0 ? standings[idx] : null;
-    const teamMatches = matches.filter((m) => m.home === selectedClub || m.away === selectedClub); const next = teamMatches.find((m) => m.status === 'soon') || teamMatches.find((m) => m.status === 'live');
-    const goalDiff = row ? num(row[5].split('–')[0]) - num(row[5].split('–')[1]) : 0;
     const clubKey = selectedClub;
-    const page = `<div class="page-head"><div><div class="page-kicker">МОЯ КОМАНДА · РПЛ</div><h1 class="page-title">Клуб</h1></div><button class="round-select" id="searchClubBtn">Сменить ↗</button></div><section class="club-hero"><div class="club-topline"><span class="club-chip">СЕЗОН 26—27${row ? ` / № ${idx + 1}` : ''}</span><button class="star ${favorites.has(selectedClub) ? 'selected' : ''}" data-favorite-club="${safe(selectedClub)}" aria-label="В избранное">☆</button></div><div class="club-identity">${clubBadge(selectedClub)}<div><h1>${safe(c?.short || 'Клуб')}</h1><div class="club-city">${safe(c?.city || 'Россия')} · РОССИЯ</div></div></div><div class="club-stats"><div class="club-stat"><b>${row ? safe(row[6]) : '—'}</b><span>очков</span></div><div class="club-stat"><b>${row ? safe(row[1]) : '—'}</b><span>матчей</span></div><div class="club-stat"><b>${row ? safe(row[5]) : '—'}</b><span>мячи</span></div></div></section><div class="club-tabs">${['обзор', 'календарь', 'новости'].map((v) => `<button class="${clubSection === v ? 'active' : ''}" data-club-section="${v}">${v}</button>`).join('')}</div>${clubSection === 'обзор' ? `<div class="section-heading"><h2>Следующий матч</h2><span class="micro">${next ? `ТУР ${next.round}` : 'НЕТ В РАСПИСАНИИ'}</span></div>${next ? matchCard(next) : '<div class="empty-note">Матч клуба не найден в текущей выдаче поставщика.</div>'}<div class="club-data"><div class="data-tile"><b>${row ? `${row[2]}–${row[3]}–${row[4]}` : '—'}</b><span>победы · ничьи · поражения</span></div><div class="data-tile"><b>${row ? `${goalDiff > 0 ? '+' : ''}${goalDiff}` : '—'}</b><span>разница мячей</span></div></div><div class="section-heading"><h2>Матчи клуба</h2><button class="link-button" data-go="matches">Календарь ↗</button></div><div class="match-list">${teamMatches.slice(0, 3).map(matchCard).join('') || '<div class="empty-note">Матчей пока нет в загруженном окне.</div>'}</div><div class="section-heading"><h2>Состав клуба</h2><span class="micro">${safe(dataProviderName())}</span></div><div id="clubSquad" class="club-squad"><div class="empty-note">Ростер появится после запроса к поставщику.</div></div>` : clubSection === 'календарь' ? `<div class="section-heading"><h2>Игры клуба</h2><span class="micro">${safe(dataProviderName())}</span></div><div class="match-list">${teamMatches.map(matchCard).join('') || '<div class="empty-note">Матчи не найдены.</div>'}</div>` : '<div class="empty-note">Новости не входят в первый этап интеграции.</div>'}<p class="footnote">Клубный календарь и ростеры — ${safe(dataProviderName())}; GOAL API дополняет пропуски и служит резервом. Права на публичное использование эмблем и изображений нужно подтвердить до релиза.</p>`;
-    if (clubSection === 'обзор') setTimeout(() => loadClubSquad(clubKey), 0);
-    return page;
+    const roster = `<div id="clubSquad" class="club-squad">${squadCache.has(clubKey) ? rosterMarkup(squadCache.get(clubKey), squadMetaCache.get(clubKey), clubKey) : '<div class="empty-note">Загружаем состав…</div>'}</div>`;
+    if (clubSection === 'состав') setTimeout(() => { if (selectedClub === clubKey) loadClubSquad(clubKey); }, 0);
+    return clubProfilePage(roster);
   }
   function liveOpenMatch(id) {
     const m = matches.find((entry) => String(entry.id) === String(id)); if (!m) return; modalMatch = m;
     const h = clubs[m.home], a = clubs[m.away]; if (!h || !a) return;
-    const events = m.events.length ? m.events.map((e) => `<div class="event-row"><span class="event-time">${e[0]}</span><span class="event-main">${e[1]}</span><span class="event-side">${e[2]}</span></div>`).join('') : '<div class="empty-note">События для этого матча не пришли в ответе поставщика.</div>';
+    const events = m.events.length ? m.events.map((e) => `<div class="event-row"><span class="event-time">${safe(e[0])}</span><span class="event-main">${safe(e[1])}</span><span class="event-side">${safe(e[2])}</span></div>`).join('') : '<div class="empty-note">События для этого матча не пришли в ответе поставщика.</div>';
     const stats = m.stats.length ? m.stats.map((s) => {
       const homeValue = Number.isFinite(Number(s[3])) ? Number(s[3]) : Number(s[1]) || 0;
       const awayValue = Number.isFinite(Number(s[4])) ? Number(s[4]) : Number(s[2]) || 0;
@@ -442,41 +402,27 @@
     openOverlay();
     loadLineups(m);
   }
-  let liveBindingInstalled = false;
-  function installLiveBinding() {
-    if (liveBindingInstalled) return;
-    liveBindingInstalled = true;
-    const originalBind = window.bind;
-    window.bind = function () {
-      originalBind();
-      document.querySelectorAll('[data-fav-match], [data-favorite-club]').forEach((button) => {
-        button.addEventListener('click', () => { try { localStorage.setItem('temp-rpl-favorites', JSON.stringify([...favorites])); } catch { /* storage is optional */ } });
-      });
-    };
-  }
   function applyPayload(payload) {
-    makeCalendar();
     const fixtureRows = findArray(payload.fixtures || payload.matches || payload, ['fixtures', 'matches', 'items', 'results', 'data']);
     const tableRows = findArray(payload.standings || {}, ['standings', 'table', 'entries', 'rows', 'data']);
     const hasFixtureArray = Array.isArray(payload.fixtures) || Array.isArray(payload.fixtures?.data) || Array.isArray(payload.matches) || Array.isArray(payload.matches?.data);
     if (!hasFixtureArray || !tableRows.length) throw new Error('Unexpected RPL data response shape');
-    const newMatches = fixtureRows.map(fixture).filter((m) => m.dateKey).sort((a, b) => a.dateKey.localeCompare(b.dateKey) || a.time.localeCompare(b.time));
+    const newMatches = fixtureRows.map(fixture).filter((m) => m.dateKey).sort((a, b) => a.dateKey.localeCompare(b.dateKey) || (fixtureKickoff(a) || '99:99').localeCompare(fixtureKickoff(b) || '99:99'));
     const newTable = tableRows.map(standing);
     if (fixtureRows.length && !newMatches.length) throw new Error('RPL fixture dates could not be parsed');
     matches.splice(0, matches.length, ...newMatches);
     if (newMatches.length) {
       const current = newMatches.find((m) => m.status === 'live') || newMatches.find((m) => m.status === 'soon' && m.dateKey >= moscowDateKey()) || newMatches[0];
       window.apiRound = current?.round || 13; round = window.apiRound;
-      if (current?.dateKey) setCalendarWeek(startOfWeek(current.dateKey), current.dateKey);
     } else { window.apiRound = 13; round = 13; }
     standings.splice(0, standings.length, ...newTable);
     window.rplDataProvider = payload.provider || 'GOAL API';
     window.rplStandingsProvider = payload.standingsProvider || payload.provider || 'GOAL API';
     window.rplGoalApiConfigured = Boolean(window.rplGoalApiConfigured || payload.supplementalProvider || payload.provider === 'GOAL API');
     window.isLiveData = true; window.dataFreshAt = payload.fetchedAt || new Date().toISOString(); window.fixtureHistoryComplete = payload.fixtureHistoryComplete !== false;
-    window.home = liveHome; window.matchesPage = liveMatchesPage; window.tablePage = liveTablePage; window.clubPage = liveClubPageRoster; window.openMatch = liveOpenMatch;
+    window.tablePage = liveTablePage; window.clubPage = liveClubPageRoster; window.openMatch = liveOpenMatch;
     window.loadMatchLineups = loadLineups;
-    installLiveBinding();
+    window.loadMatchInsights = loadMatchInsights;
     window.installDetailedMatchLayer?.();
     startLiveStream();
     setDataRibbon(); render();
@@ -502,9 +448,8 @@
     finally { if (refreshPending === request) refreshPending = null; setRefreshBusy(false); }
   }
 
-  const saved = localStorage.getItem('temp-rpl-favorites');
-  if (saved) { try { favorites = new Set(JSON.parse(saved)); } catch { /* keep demo default */ } }
   window.isLiveData = false; window.goalLiveStreamState = 'idle'; window.apiRound = 13; window.rplSeason = '2026';
+  window.rplClubKeyForName = (name) => keyFor(name, '');
   window.rplDataProvider = 'Flashscore'; window.rplStandingsProvider = 'Flashscore'; window.rplGoalApiConfigured = false;
   setDataRibbon();
   setRefreshBusy(true);
@@ -515,6 +460,8 @@
     window.rplGoalApiConfigured = Boolean(status.goalApiConfigured);
     if (!status.configured) return;
     window.rplSeason = status.season || '2026';
+    const seasonLabel = document.getElementById('brand-season');
+    if (seasonLabel && /^\d{4}$/.test(String(window.rplSeason))) seasonLabel.textContent = `РПЛ · ${window.rplSeason}/${String(Number(window.rplSeason) + 1).slice(-2)}`;
     return refresh({ quiet: true }).catch((error) => { console.warn('RPL data providers unavailable; retaining explicit demo view', error); setDataRibbon(true); render(); });
   }).catch(() => setDataRibbon()).finally(() => { if (!refreshPending) setRefreshBusy(false); });
   setInterval(() => { if (window.isLiveData && document.visibilityState === 'visible') refresh({ quiet: true }).catch((e) => console.warn('GOAL API refresh failed', e)); }, 5 * 60 * 1000);

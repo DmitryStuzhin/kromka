@@ -4,7 +4,7 @@ import { createHash } from 'node:crypto';
 import { mkdir, readFile, rename, stat, writeFile } from 'node:fs/promises';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { FLASH_TEAM_BY_GOAL_ID, flashscoreMatchEvents, flashscoreMatchLineups, flashscoreMatchStatistics, flashscoreRoster, flashscoreRosterById, flashscoreSeasonPayload } from './flashscore-adapter.mjs';
+import { FLASH_TEAM_BY_GOAL_ID, flashscoreMatchEvents, flashscoreMatchLineups, flashscoreMatchStatistics, flashscoreRoster, flashscoreRosterById, flashscoreSeasonPayload, predictFlashscoreLineup } from './flashscore-adapter.mjs';
 
 const ROOT = path.dirname(fileURLToPath(import.meta.url));
 const PORT = Number(process.env.PORT || 4173);
@@ -54,6 +54,7 @@ let persistentCacheWrite = Promise.resolve();
 const liveStreamClients = new Set();
 let flashscoreProxyProcess = null;
 let flashscoreSquadsCache = { at: 0, players: [] };
+let flashscoreSquadsPending;
 let goalLiveSocket = null;
 let goalLiveFixtureIds = [];
 let goalLiveFixtureKey = '';
@@ -131,11 +132,15 @@ async function flashscoreGet(endpoint) {
   return response.json();
 }
 async function flashscoreSquadPlayers() {
-  if (flashscoreSquadsCache.players.length && Date.now() - flashscoreSquadsCache.at < 6 * 60 * 60_000) return flashscoreSquadsCache.players;
-  const payload = await flashscoreGet('/api/squads');
-  if (!Array.isArray(payload?.players)) throw new Error('Flashscore proxy returned an invalid squads payload');
-  flashscoreSquadsCache = { at: Date.now(), players: payload.players };
-  return flashscoreSquadsCache.players;
+  if (flashscoreSquadsCache.players.length && Date.now() - flashscoreSquadsCache.at < 30 * 60_000) return flashscoreSquadsCache.players;
+  if (!flashscoreSquadsPending) {
+    flashscoreSquadsPending = flashscoreGet('/api/squads').then(payload => {
+      if (!Array.isArray(payload?.players)) throw new Error('Flashscore proxy returned an invalid squads payload');
+      flashscoreSquadsCache = { at: Date.now(), players: payload.players };
+      return payload.players;
+    }).finally(() => { flashscoreSquadsPending = null; });
+  }
+  return flashscoreSquadsPending;
 }
 function dateKeyOf(value) {
   const raw = String(value ?? '');
@@ -161,7 +166,16 @@ function attachGoalFixtureIds(flashFixtures, goalFixtures) {
       const goalDay = dateKeyOf(goal.kickoffUtc || goal.kickoff_utc || goal.matchDate || goal.kickoff || goal.date || '');
       return !goalDay || !fixture.kickoffUtc || Math.abs(Date.parse(`${goalDay}T12:00:00Z`) - Date.parse(`${fixture.kickoffUtc.slice(0, 10)}T12:00:00Z`)) <= 86_400_000;
     });
-    if (candidates.length === 1) fixture.goalFixtureId = String(candidates[0].id || candidates[0].fixtureId || '');
+    if (candidates.length === 1) {
+      const goal = candidates[0];
+      fixture.goalFixtureId = String(goal.id || goal.fixtureId || '');
+      if (fixture.matchRound == null) {
+        const value = goal.matchRound ?? goal.round ?? goal.matchday ?? goal.week;
+        const label = value && typeof value === 'object' ? value.number ?? value.matchday ?? value.round ?? value.name : value;
+        const round = Number(String(label ?? '').trim().match(/^(?:(?:round|matchday|тур)\s*[-: ]?\s*)?(\d{1,2})$/iu)?.[1]);
+        if (round >= 1 && round <= 30) fixture.matchRound = round;
+      }
+    }
   }
 }
 function startFlashscoreProxy() {
@@ -651,9 +665,42 @@ async function goalLineupsFor(fixtureId, fixture) {
   const goalId = await goalFixtureIdFor(fixtureId, fixture);
   if (!goalId) return null;
   const finished = /FINISHED|COMPLETE|ENDED|FT/.test(fixture.status);
-  const payload = await goalGet(`/fixtures/${encodeURIComponent(goalId)}/lineups`, finished ? 24 * 60 * 60_000 : 10 * 60_000);
+  const farFromKickoff = Date.parse(fixture.kickoffUtc) - Date.now() > 2 * 60 * 60_000;
+  const ttl = finished ? 24 * 60 * 60_000 : farFromKickoff ? 10 * 60_000 : 60_000;
+  const payload = await goalGet(`/fixtures/${encodeURIComponent(goalId)}/lineups`, ttl);
   const enriched = await enrichLineups(payload, fixture);
   return { ...enriched.payload, portraitFallback: enriched.meta, provider: 'GOAL API' };
+}
+
+function lineupTeamOf(payload, side) {
+  const data = payload?.data || payload || {};
+  return data[side] || data[`${side}Team`] || {};
+}
+
+function hasLineupTeam(team) {
+  const starters = team?.startingLineups || team?.starting_lineups ||
+    Object.entries(team || {}).find(([key, value]) => Array.isArray(value) && /starting|starter/i.test(key))?.[1];
+  return Array.isArray(starters) && starters.length > 0;
+}
+
+function canPredict(fixture) {
+  return /^(SCHEDULED|NOT.?STARTED|NS|TIMED|UPCOMING|PENDING|TBD)$/i.test(fixture.status) &&
+    Date.parse(fixture.kickoffUtc) > Date.now();
+}
+
+async function lineupWithPrediction(payload, fixture) {
+  if (!canPredict(fixture) || !FLASHSCORE_ENABLED) return payload;
+  const missing = ['home', 'away'].filter(side => !hasLineupTeam(lineupTeamOf(payload, side)));
+  if (!missing.length) return payload;
+  const players = await flashscoreSquadPlayers().catch(() => []);
+  const prediction = { provider: 'Flashscore', basis: 'season-league-minutes' };
+  for (const side of missing) {
+    const teamCode = fixture[side === 'home' ? 'flashscoreHomeCode' : 'flashscoreAwayCode'] ||
+      FLASH_TEAM_BY_GOAL_ID.get(fixture[side === 'home' ? 'homeTeamId' : 'awayTeamId']);
+    const team = predictFlashscoreLineup(players, teamCode);
+    if (team) prediction[side] = team;
+  }
+  return prediction.home || prediction.away ? { ...(payload || { data: {} }), prediction } : payload;
 }
 
 async function goalMatchDataFor(fixtureId, fixture, resource, ttl) {
@@ -774,28 +821,26 @@ const server = http.createServer(async (req, res) => {
           flashscoreSquadPlayers().catch(() => [])
         ]);
         flashscoreLineups = flashscoreMatchLineups(matchPayload, fixture, rosterMapForFixture(players, fixture));
-        const homeCount = flashscoreLineups.data.home.startingLineups.length;
-        const awayCount = flashscoreLineups.data.away.startingLineups.length;
-        if (homeCount || awayCount) return send(res, 200, flashscoreLineups);
+        if (hasLineupTeam(lineupTeamOf(flashscoreLineups, 'home')) &&
+            hasLineupTeam(lineupTeamOf(flashscoreLineups, 'away'))) return send(res, 200, flashscoreLineups);
       } catch (error) { console.warn('Flashscore lineups unavailable:', error.message); }
     }
-    try {
-      const goalPayload = await goalLineupsFor(fixtureId, fixture);
-      if (goalPayload) return send(res, 200, goalPayload);
-      if (flashscoreLineups) return send(res, 200, flashscoreLineups);
-      if (!GOAL_API_KEY) return send(res, 503, { error: 'No lineup provider is available' });
-    } catch (error) {
-      console.error('GOAL API lineup fallback failed:', error.message);
-      if (flashscoreLineups) return send(res, 200, flashscoreLineups);
-      return send(res, 502, { error: 'Не удалось загрузить составы матча', status: error.status || 502 });
+    const goalPayload = await goalLineupsFor(fixtureId, fixture).catch(error => {
+      console.warn('GOAL API lineup fallback failed:', error.message);
+      return null;
+    });
+    let payload = goalPayload || flashscoreLineups;
+    if (goalPayload && flashscoreLineups) {
+      const sides = ['home', 'away'];
+      const useFlash = side => hasLineupTeam(lineupTeamOf(flashscoreLineups, side));
+      if (sides.some(useFlash)) {
+        const data = Object.fromEntries(sides.map(side => [side, lineupTeamOf(useFlash(side) ? flashscoreLineups : goalPayload, side)]));
+        payload = { data, provider: sides.some(side => !useFlash(side) && hasLineupTeam(data[side])) ? 'Flashscore + GOAL API' : 'Flashscore' };
+      }
     }
-    try {
-      const goalPayload = await goalLineupsFor(fixtureId, fixture);
-      return goalPayload ? send(res, 200, goalPayload) : send(res, 502, { error: 'GOAL API fixture match ID could not be matched' });
-    } catch (error) {
-      console.error('GOAL API lineup request failed:', error.message);
-      return send(res, 502, { error: 'Не удалось загрузить составы матча', status: error.status || 502 });
-    }
+    payload = await lineupWithPrediction(payload, fixture);
+    if (payload) return send(res, 200, payload);
+    return send(res, GOAL_API_KEY ? 502 : 503, { error: 'Не удалось загрузить составы матча' });
   }
   const matchDataRoute = url.pathname.match(/^\/api\/fixtures\/([a-zA-Z0-9_-]{1,64})\/(events|statistics)$/);
   if (matchDataRoute) {

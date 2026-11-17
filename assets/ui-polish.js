@@ -31,50 +31,6 @@
     </section>`;
   }
 
-  function clubInsights(key) {
-    const row = records().find((item) => item[0] === key);
-    if (!row) return '';
-    const played = asNumber(row[1]);
-    if (!played) return '';
-    const wins = asNumber(row[2]);
-    const draws = asNumber(row[3]);
-    const losses = asNumber(row[4]);
-    const [scored, conceded] = getGoalNumbers(row);
-    const goalDiff = scored - conceded;
-    const ppg = asNumber(row[6]) / played;
-    const winRate = percent(wins, played);
-    const resultTotal = Math.max(1, wins + draws + losses);
-    const goalsPerGame = scored / played;
-    const concededPerGame = conceded / played;
-    const allGoalRates = records().filter((item) => asNumber(item[1]) > 0).flatMap((item) => {
-      const [forGoals, againstGoals] = getGoalNumbers(item);
-      return [forGoals / asNumber(item[1]), againstGoals / asNumber(item[1])];
-    });
-    const maxGoalRate = Math.max(1, ...allGoalRates);
-    return `<section class="insight-card club-insights" aria-label="Статистика сезона клуба">
-      <div class="insight-head"><div><h2 class="insight-title">Сезон в цифрах</h2><p class="insight-caption">Простые показатели из турнирной таблицы</p></div><span class="insight-source">${sourceLabel()}</span></div>
-      <div class="insight-metrics">
-        <div class="insight-metric"><b>${decimal(ppg)}</b><span>очка за матч</span></div>
-        <div class="insight-metric"><b>${winRate}%</b><span>побед</span></div>
-        <div class="insight-metric"><b>${goalDiff > 0 ? '+' : ''}${goalDiff}</b><span>разница мячей</span></div>
-        <div class="insight-metric"><b>${played}</b><span>сыграно</span></div>
-      </div>
-      <div class="chart-section"><h3 class="chart-section-title">Результаты <small>${wins}–${draws}–${losses}</small></h3>
-        <div class="form-chart" role="img" aria-label="Победы: ${wins} (${percent(wins, resultTotal)} процентов), ничьи: ${draws} (${percent(draws, resultTotal)} процентов), поражения: ${losses} (${percent(losses, resultTotal)} процентов)">
-          <i class="form-segment wins" style="width:${percent(wins, resultTotal)}%"></i><i class="form-segment draws" style="width:${percent(draws, resultTotal)}%"></i><i class="form-segment losses" style="width:${percent(losses, resultTotal)}%"></i>
-        </div>
-        <div class="chart-legend"><span class="chart-legend-item"><i class="chart-legend-dot"></i>Победы ${wins}</span><span class="chart-legend-item"><i class="chart-legend-dot draws"></i>Ничьи ${draws}</span><span class="chart-legend-item"><i class="chart-legend-dot losses"></i>Поражения ${losses}</span></div>
-      </div>
-      <div class="chart-section"><h3 class="chart-section-title">Голы за игру <small>в среднем</small></h3>
-        <div class="goal-comparison" role="img" aria-label="В среднем за матч: забито ${decimal(goalsPerGame)}, пропущено ${decimal(concededPerGame)}">
-          <div class="goal-row"><span>Забито</span><span class="goal-track"><i class="goal-fill" style="width:${Math.max(2, goalsPerGame / maxGoalRate * 100)}%"></i></span><strong>${decimal(goalsPerGame)}</strong></div>
-          <div class="goal-row"><span>Пропущено</span><span class="goal-track"><i class="goal-fill conceded" style="width:${Math.max(2, concededPerGame / maxGoalRate * 100)}%"></i></span><strong>${decimal(concededPerGame)}</strong></div>
-        </div>
-      </div>
-      <p class="insight-note">Забито и пропущено за игру = мячи ÷ сыгранные матчи.${window.isLiveData ? ' Источник — текущая таблица GOAL API.' : ' Это демонстрационный срез, не live-статистика.'}</p>
-    </section>`;
-  }
-
   function activeTab() {
     return document.querySelector('.nav-item.active')?.dataset.tab || '';
   }
@@ -89,11 +45,6 @@
         render();
         window.scrollTo({ top: 0, behavior: 'smooth' });
       }));
-    }
-    const clubSectionLabel = root.querySelector('.club-tabs button.active')?.textContent?.trim()?.toLowerCase();
-    if (activeTab() === 'club' && clubSectionLabel === 'обзор' && root.querySelector('.club-hero') && !root.querySelector('.club-insights')) {
-      root.querySelector('.club-hero').insertAdjacentHTML('afterend', clubInsights(selectedClub));
-      root.querySelector('.club-data')?.remove();
     }
   }
 

@@ -93,7 +93,6 @@ test('detail navigation is linked, keyboard-focusable, and included in the PWA a
 
 test('GOAL mode renders the live pages and preserves provider ranking order on ties', () => {
   assert.match(html, /today:window\.home\|\|home,matches:window\.matchesPage\|\|matchesPage/);
-  assert.match(goal, /const nextStandings = tableRows\.map\(standing\);/);
   assert.match(goal, /const newTable = tableRows\.map\(standing\);/);
   assert.doesNotMatch(goal, /tableRows\.map\(standing\)\.sort\(\(a, b\) => b\[6\] - a\[6\]\)/);
 });

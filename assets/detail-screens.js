@@ -100,7 +100,7 @@
     const events = Array.isArray(match.events) ? match.events : [];
     if (!events.length) {
       const state = match.detailDataStatus?.events;
-      const message = match.status === 'soon' ? 'До стартового свистка событий матча ещё нет.' : state === 'failed' ? 'Не удалось получить события GOAL API. Попробуйте открыть матч позже.' : state === 'empty' ? 'GOAL API не передал события для этого матча.' : 'События не пришли в текущем ответе поставщика.';
+      const message = match.status === 'soon' ? 'До стартового свистка событий матча ещё нет.' : state === 'failed' ? 'Не удалось получить события. Попробуйте открыть матч позже.' : state === 'empty' ? 'Источник не передал события этого матча.' : window.isLiveData ? 'Загружаем ход матча…' : 'В демо-данных нет событий этого матча.';
       return `<div class="empty-note">${message}</div>`;
     }
     const minuteValue = (value) => {
@@ -113,6 +113,7 @@
     const belongsTo = (team, key) => {
       const label = String(team || '').toLocaleLowerCase('ru-RU');
       const club = clubs[key] || {};
+      if (label && window.rplClubKeyForName?.(label) === key) return true;
       return Boolean(label) && [club.short, club.name].filter(Boolean).some((name) => {
         const normalized = String(name).toLocaleLowerCase('ru-RU');
         return label.includes(normalized) || normalized.includes(label);
@@ -160,24 +161,25 @@
   }
   function matchPage(match) {
     const home = clubs[match.home] || {}; const away = clubs[match.away] || {};
-    const dateLabel = match.dateKey ? new Intl.DateTimeFormat('ru-RU', { weekday: 'long', day: 'numeric', month: 'long' }).format(new Date(`${match.dateKey}T12:00:00`)) : match.date;
-    const matchTime = match.status === 'soon' ? (String(match.time || '').match(/(\d{1,2}:\d{2})/)?.[1] || (/^\d{1,2}:\d{2}$/.test(String(match.score || '')) ? String(match.score) : '')) : '';
-    const status = match.status === 'soon' ? (matchTime ? `Начало · ${matchTime}` : 'Время уточняется') : match.status === 'live' ? `Идёт · ${match.time}` : 'Завершён';
+    const dateLabel = match.dateKey ? formatCalendarDate(match.dateKey) : match.date;
+    const matchTime = fixtureKickoff(match);
+    const status = match.status === 'soon' ? (matchTime ? 'Не начался' : 'Время уточняется') : match.status === 'live' ? `В игре${/^\d+(?:\+\d+)?′$/.test(match.time) ? ` · ${match.time}` : ''}` : 'Завершён';
+    const followed = favoriteMatches.has(String(match.id));
     const standingsCaption = [teamRank(match.home) && `${teamRank(match.home)}-е место`, teamRank(match.away) && `${teamRank(match.away)}-е место`].filter(Boolean).join(' · ');
     const eventCount = Array.isArray(match.events) ? match.events.length : 0;
     const eventCountMod100 = eventCount % 100; const eventCountMod10 = eventCount % 10;
     const eventCountLabel = eventCount ? `${eventCount} ${eventCountMod100 >= 11 && eventCountMod100 <= 14 ? 'событий' : eventCountMod10 === 1 ? 'событие' : eventCountMod10 >= 2 && eventCountMod10 <= 4 ? 'события' : 'событий'}` : detailSource();
     return `<div class="detail-page match-detail-page">
-      <div class="detail-toolbar"><button type="button" class="detail-back" data-detail-back>← <span>Назад</span></button><span class="detail-toolbar-label">МАТЧ · ТУР ${escape(match.round || '—')}</span><button type="button" class="detail-star ${favoriteMatches.has(String(match.id)) ? 'selected' : ''}" data-detail-favorite="${escape(match.id)}" aria-label="${favoriteMatches.has(String(match.id)) ? 'Убрать матч из избранного' : 'Добавить матч в избранное'}">☆</button></div>
-      <header class="match-detail-hero"><div class="detail-kicker">РПЛ · ${escape(dateLabel)}${matchTime ? ` · ${escape(matchTime)}` : ''}</div><div class="match-detail-teams"><button type="button" class="detail-team-link" data-detail-club="${escape(match.home)}">${clubBadge(match.home, 'detail-team-crest')}<strong>${escape(home.short || home.name || 'Хозяева')}</strong><small>${escape(home.city || 'Россия')}</small></button><div class="match-detail-score"><span>${escape(match.status === 'soon' ? '—' : match.score || '—')}</span><small>${escape(status)}</small></div><button type="button" class="detail-team-link away" data-detail-club="${escape(match.away)}">${clubBadge(match.away, 'detail-team-crest')}<strong>${escape(away.short || away.name || 'Гости')}</strong><small>${escape(away.city || 'Россия')}</small></button></div><div class="match-detail-venue"><span>${escape(match.venue || 'Стадион не указан')}</span><small>${escape(detailSource())}</small></div></header>
-      <nav class="detail-anchor-nav" aria-label="Разделы матча"><button type="button" data-detail-anchor="matchLineupsSection">Составы</button><button type="button" data-detail-anchor="season-comparison">Сезон</button><button type="button" data-detail-anchor="match-h2h">Очные</button><button type="button" data-detail-anchor="match-form">Форма</button><button type="button" data-detail-anchor="match-events">События</button><button type="button" data-detail-anchor="match-statistics">Статистика</button></nav>
-      <section class="detail-card lineups-card" id="matchLineupsSection"><div class="detail-section-head"><div><span class="detail-kicker">${match.status === 'soon' ? 'ПЕРЕД МАТЧЕМ' : 'СОСТАВЫ МАТЧА'}</span><h2>Составы</h2></div><span class="detail-source">${match.status === 'soon' ? 'ЕЩЁ НЕ ОПУБЛИКОВАНЫ' : 'GOAL API'}</span></div><div id="matchLineups" class="match-lineups" aria-live="polite">${match.status === 'soon' ? '<div class="lineups-pending"><span class="lineups-pending-mark">XI</span><span><strong>Стартовые составы пока не опубликованы</strong><small>Появятся здесь, когда GOAL передаст подтверждённые данные</small></span></div>' : '<div class="empty-note">Запрашиваю подтверждённые составы…</div>'}</div></section>
+      <div class="detail-toolbar"><div class="matchday-detail-leading"><span class="matchday-mark" aria-hidden="true"></span><button type="button" class="detail-back" data-detail-back aria-label="Назад"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M20 12H4m7-7-7 7 7 7"/></svg></button></div><h1 class="detail-toolbar-label">Матч</h1><button type="button" class="detail-star matchday-star ${followed ? 'selected' : ''}" data-detail-favorite="${escape(match.id)}" aria-pressed="${followed}" aria-label="${followed ? 'Убрать матч из избранного' : 'Добавить матч в избранное'}">${matchdayStar}</button></div>
+      <header class="match-detail-hero"><div class="detail-kicker">РПЛ${match.round ? ` · ${escape(match.round)}-й тур` : ''}</div><div class="match-detail-teams"><button type="button" class="detail-team-link" data-detail-club="${escape(match.home)}">${clubBadge(match.home, 'detail-team-crest')}<strong>${escape(home.short || home.name || 'Хозяева')}</strong></button><div class="match-detail-score"><span>${escape(match.status === 'soon' ? (matchTime || '—') : String(match.score || '—').replace(/\s+/g, ''))}</span><small class="${match.status === 'live' ? 'is-live' : ''}">${escape(status)}</small></div><button type="button" class="detail-team-link away" data-detail-club="${escape(match.away)}">${clubBadge(match.away, 'detail-team-crest')}<strong>${escape(away.short || away.name || 'Гости')}</strong></button></div><div class="match-detail-venue"><span>${escape(dateLabel)}${matchTime ? ` · ${escape(matchTime)} МСК` : ''}</span></div></header>
+      <nav class="detail-anchor-nav" data-concept-layout="true" aria-label="Разделы матча"><button type="button" data-detail-anchor="match-events" aria-controls="match-events">События</button><button type="button" data-detail-anchor="matchLineupsSection" aria-controls="matchLineupsSection">Составы</button><button type="button" data-detail-anchor="match-statistics" aria-controls="match-statistics">Статистика</button><button type="button" data-detail-anchor="match-h2h" aria-controls="match-h2h season-comparison match-form">Очные</button></nav>
+      <section class="detail-card lineups-card" id="matchLineupsSection"><div class="detail-section-head"><h2>Составы</h2></div><div id="matchLineups" class="match-lineups" aria-live="polite"><div class="empty-note">${window.isLiveData ? 'Загружаем составы…' : 'Стартовые составы пока не опубликованы'}</div></div></section>
       ${seasonCompare(match)}
       ${headToHead(match)}
       <section class="detail-card form-card" id="match-form"><div class="detail-section-head"><div><span class="detail-kicker">ПОСЛЕДНИЕ ЗАВЕРШЁННЫЕ</span><h2>Форма команд</h2></div><span class="detail-source">ДО 5 ИГР</span></div><div class="match-form-grid">${formTeam(match.home)}${formTeam(match.away)}</div><div class="form-legend" aria-label="В означает победа, Н означает ничья, П означает поражение"><span><i class="win">В</i> Победа</span><span><i class="draw">Н</i> Ничья</span><span><i class="loss">П</i> Поражение</span></div></section>
       <section class="detail-card match-events-card" id="match-events"><div class="detail-section-head"><div><span class="detail-kicker">ХОД МАТЧА</span><h2>Хронология</h2></div><span class="detail-source">${eventCountLabel}</span></div>${eventList(match)}</section>
       <section class="detail-card match-stats-card" id="match-statistics"><div class="detail-section-head"><div><span class="detail-kicker">${match.status === 'soon' ? 'ПОСЛЕ СТАРТА' : 'ПО МАТЧУ'}</span><h2>Статистика матча</h2></div></div>${matchStats(match)}</section>
-      <p class="detail-data-note">${window.isLiveData ? `Источник: GOAL API · актуальность ${escape(window.dataFreshAt ? new Intl.DateTimeFormat('ru-RU', { day: 'numeric', month: 'short', hour: '2-digit', minute: '2-digit' }).format(new Date(window.dataFreshAt)) : 'при последнем обновлении')}. ${escape(standingsCaption)}` : 'Это демонстрационный экран. Расписание и результаты в демо-режиме не являются фактическими данными.'}</p>
+      <p class="detail-data-note">${window.isLiveData ? [match.venue, window.rplDataProvider, standingsCaption].filter(Boolean).map(escape).join(' · ') : 'Демо-режим · расписание и результаты приведены как пример.'}</p>
     </div>`;
   }
   function playerProfilePage(player) {
@@ -209,14 +211,35 @@
       const match = matches.find((item) => String(item.id) === String(detailRoute.id));
       if (!match) { detailRoute = null; return false; }
       modalMatch = match;
+      const focusedTab = root.contains(document.activeElement) ? document.activeElement.dataset.detailAnchor : '';
+      const focusedStar = root.contains(document.activeElement) && document.activeElement.hasAttribute('data-detail-favorite');
+      root.classList.add('matchday-detail');
       root.innerHTML = matchPage(match);
-      if (window.loadMatchLineups) requestAnimationFrame(() => window.loadMatchLineups(match));
+      const buttons = [...root.querySelectorAll('[data-detail-anchor]')];
+      const select = (target) => {
+        detailRoute.panel = target;
+        for (const button of buttons) {
+          const active = button.dataset.detailAnchor === target;
+          button.classList.toggle('active', active);
+          button.setAttribute('aria-pressed', String(active));
+          for (const id of button.getAttribute('aria-controls').split(' ')) {
+            const panel = document.getElementById(id);
+            if (panel) panel.hidden = !active;
+          }
+        }
+        if (target === 'matchLineupsSection') window.loadMatchLineups?.(match);
+      };
+      buttons.forEach(button => button.addEventListener('click', () => select(button.dataset.detailAnchor)));
+      select(detailRoute.panel || 'match-events');
+      buttons.find(button => button.dataset.detailAnchor === focusedTab)?.focus({preventScroll:true});
+      if (focusedStar) root.querySelector('[data-detail-favorite]')?.focus({preventScroll:true});
+      if (window.loadMatchInsights) requestAnimationFrame(() => { if (detailRoute?.type === 'match' && detailRoute.id === String(match.id)) window.loadMatchInsights(match); });
     } else if (detailRoute.type === 'player') {
+      root.classList.remove('matchday-detail');
       root.innerHTML = playerProfilePage(detailRoute.player);
     }
     root.querySelectorAll('[data-detail-back]').forEach((button) => button.addEventListener('click', backFromDetail));
     root.querySelectorAll('[data-detail-club]').forEach((button) => button.addEventListener('click', () => openClub(button.dataset.detailClub)));
-    root.querySelectorAll('[data-detail-anchor]').forEach((button) => button.addEventListener('click', () => document.getElementById(button.dataset.detailAnchor)?.scrollIntoView({ behavior: 'smooth', block: 'start' })));
     root.querySelector('[data-detail-favorite]')?.addEventListener('click', (event) => {
       const id = String(event.currentTarget.dataset.detailFavorite);
       if (favoriteMatches.has(id)) favoriteMatches.delete(id); else favoriteMatches.add(id);
@@ -252,48 +275,27 @@
       return;
     }
     const top = detailRoute?.previousScroll || 0;
+    const previousMatch = detailRoute?.id;
     detailRoute = null;
     window.render();
     window.scrollTo({ top, behavior: 'instant' });
+    if (previousMatch) [...document.querySelectorAll('[data-match]')].find(button => button.dataset.match === previousMatch)?.focus({preventScroll:true});
   }
   function openMatchDetail(id) {
     const match = matches.find((item) => String(item.id) === String(id));
     if (!match) return;
     detailRoute = { type: 'match', id: String(id), previousScroll: window.scrollY || 0 };
+    matchdaySelection = String(id);
     modalMatch = match;
     window.render();
     window.scrollTo({ top: 0, behavior: 'instant' });
-  }
-  function formMarkupForClub(key) {
-    const form = recentForm(key);
-    const row = standingFor(key);
-    const splits = window.rplSeasonAnalytics?.teamSplits(matches, key);
-    const splitSummary = (label, split) => `<div class="club-split-item"><span>${label}</span><b>${split?.played ? `${split.won}–${split.drawn}–${split.lost}` : '—'}</b><small>${split?.played ? `${split.played} игр · мячи ${split.goalsFor}–${split.goalsAgainst}` : 'Матчей пока нет'}</small></div>`;
-    const seasonSplits = splits?.total.played ? `<div class="club-split-grid">${splitSummary('Дома · В–Н–П', splits.home)}${splitSummary('В гостях · В–Н–П', splits.away)}<div class="club-split-item"><span>Сухие матчи</span><b>${splits.total.cleanSheets}</b><small>в ${splits.total.played} завершённых играх</small></div></div><p class="detail-footnote">Разрез рассчитан по доступным завершённым матчам${window.isLiveData ? (window.fixtureHistoryComplete === false ? ' · история поставщика неполная' : ' сезона 2026/27') : ' демо-среза, не live'}; будущие и текущие матчи не считаются.</p>` : '<div class="empty-note">Домашние и гостевые показатели появятся после завершённых матчей.</div>';
-    const results = form.map(({ result, opponent, score, match }) => {
-      const own = match.home === key ? score[0] : score[1];
-      const against = match.home === key ? score[1] : score[0];
-      const date = new Intl.DateTimeFormat('ru-RU', { day: '2-digit', month: 'short' }).format(new Date(`${match.dateKey}T12:00:00`));
-      return `<button type="button" class="club-form-match" data-open-form-match="${escape(match.id)}"><span class="form-result ${result}" aria-label="${resultText(result)}">${result === 'win' ? 'В' : result === 'draw' ? 'Н' : 'П'}</span><span>${clubBadge(opponent, 'form-crest')}<strong>${escape(teamLabel(opponent))}</strong></span><b>${own} : ${against}</b><small>${date} · ${resultText(result)}</small></button>`;
-    }).join('');
-    return `<section class="club-form-section"><div class="detail-section-head"><div><span class="detail-kicker">ПОСЛЕДНИЕ ЗАВЕРШЁННЫЕ</span><h2>Форма · до 5 матчей</h2></div><span class="detail-source">${detailSource()}</span></div>${row ? `<div class="club-form-summary"><b>${teamRank(key) || '—'}<small>место</small></b><b>${row[6]}<small>очков</small></b><b>${row[2]}–${row[3]}–${row[4]}<small>В–Н–П за сезон</small></b><b>${row[5]}<small>мячи</small></b></div>` : '<div class="empty-note">Клуба пока нет в текущей таблице.</div>'}<div class="club-splits"><div class="detail-section-head"><div><span class="detail-kicker">СЕЗОННЫЙ РАЗРЕЗ</span><h2>Дома и в гостях</h2></div></div>${seasonSplits}</div><div class="club-form-list">${results || '<div class="empty-note">В загруженной истории нет завершённых матчей.</div>'}</div>${form.length < 5 ? `<p class="detail-footnote">Показываем ${form.length} из 5 последних завершённых матчей${window.fixtureHistoryComplete === false ? ' · история поставщика неполная' : ''}. Результаты не дополнены демо-данными.</p>` : ''}</section>`;
-  }
-  function addClubForm() {
-    if (tab !== 'club' || clubSection !== 'обзор') return;
-    const root = document.getElementById('screen');
-    if (!root || !root.querySelector('.club-hero') || root.querySelector('.club-form-section')) return;
-    const anchor = root.querySelector('.club-insights') || root.querySelector('.club-tabs');
-    if (anchor) anchor.insertAdjacentHTML('afterend', formMarkupForClub(selectedClub));
-    root.querySelectorAll('[data-open-form-match]').forEach((button) => button.addEventListener('click', () => openMatchDetail(button.dataset.openFormMatch)));
   }
   function installDetailedMatchLayer() {
     if (typeof window.render === 'function' && window.render !== installedDetailRender) {
       const renderBelowDetails = window.render;
       installedDetailRender = function (...args) {
         if (detailRoute && renderRoute()) return;
-        const result = renderBelowDetails.apply(this, args);
-        addClubForm();
-        return result;
+        return renderBelowDetails.apply(this, args);
       };
       window.render = installedDetailRender;
     }
@@ -315,6 +317,7 @@
     window.scrollTo({ top: 0, behavior: 'instant' });
   });
   window.fixtureHistoryComplete = true;
+  window.closeMatchdayDetail = () => { detailRoute = null; profileParent = null; modalMatch = null; };
   window.refreshDetailedMatch = (id) => {
     if (detailRoute?.type === 'match' && detailRoute.id === String(id)) window.render();
   };

@@ -278,7 +278,7 @@ def squads():
         parser.feed(page(f"/team/{p}/{s}/squad/", ttl=1800))
         tabs = parser.tables
         overall = tabs.get("overall-all-table", [])
-        lg_key = f"league-{league_tid}-table" if league_tid else next((k for k in tabs if k.startswith("league-")), None)
+        lg_key = f"league-{league_tid}-table" if league_tid else None
         league = {r["href"]: r for r in tabs.get(lg_key, [])} if lg_key else {}
         seen, players, coach = set(), [], None
         stat = lambda r: [_int(r.get(k)) for k in ("matchesPlayed", "minutesPlayed", "goal", "assist", "yellowCard", "redCard")]

@@ -57,7 +57,7 @@ function goalFixture(id = 'goalfixture1') {
   return {
     id, homeTeamId: DYNAMO_ID, awayTeamId: ZENIT_ID,
     homeTeam: { id: DYNAMO_ID, name: 'Динамо Москва' }, awayTeam: { id: ZENIT_ID, name: 'Зенит' },
-    kickoffUtc: '2026-11-10T19:00:00+03:00', matchStatus: 'FINISHED', homeScore: 3, awayScore: 2
+    kickoffUtc: '2026-11-10T19:00:00+03:00', matchRound: 'Round 14', matchStatus: 'FINISHED', homeScore: 3, awayScore: 2
   };
 }
 
@@ -75,7 +75,7 @@ function flashscoreHandler({ unavailable = false, emptyMatchData = false, comple
     if (req.url === '/health') return json(res, 200, { ok: true, version: '6.0' });
     if (req.url === '/api/season' && completeSeason) return json(res, 200, { stage: 'stage-2026', count: 240, matches: completeFlashscoreSeason() });
     if (req.url === '/api/season') return json(res, 200, { stage: 'stage-2026', count: 2, matches: [
-      { id: 'FS123456', h: 'din', a: 'zen', d: '2026-11-10', t: '19:00', r: 14, st: 3, live: false, hg: 3, ag: 2 },
+      { id: 'FS123456', h: 'din', a: 'zen', d: '2026-11-10', t: '19:00', r: null, st: 3, live: false, hg: 3, ag: 2 },
       { id: 'FS123457', h: 'din', a: 'zen', d: '2026-11-20', t: '20:00', r: 15, st: 1, live: false, hg: null, ag: null }
     ] });
     if (req.url === '/api/squads') return json(res, 200, { players: [
@@ -134,6 +134,7 @@ test('Flashscore supplies fixtures and match data while GOAL supplies standings,
   assert.equal(season.standingsProvider, 'GOAL API');
   assert.equal(season.fixtures.data[0].id, 'FS123456');
   assert.equal(season.fixtures.data[0].goalFixtureId, 'goalfixture1');
+  assert.equal(season.fixtures.data[0].matchRound, 14);
   assert.equal(season.standings.data.length, 16);
   assert.equal(season.standings.data[0].overallLeaguePTS, 3);
 
@@ -148,6 +149,7 @@ test('Flashscore supplies fixtures and match data while GOAL supplies standings,
   const lineups = await lineupResponse.json();
   assert.equal(lineups.provider, 'GOAL API');
   assert.equal(lineups.data.home.startingLineups[0].name, 'Иван Петров');
+  assert.equal(lineups.prediction, undefined);
 
   const rosterResponse = await fetch(`${baseUrl}/api/teams/${DYNAMO_ID}/players`);
   assert.equal(rosterResponse.status, 200);

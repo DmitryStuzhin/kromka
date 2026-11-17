@@ -9,7 +9,7 @@ const manifest = readFileSync(new URL('../manifest.json', import.meta.url), 'utf
 const serviceWorker = readFileSync(new URL('../service-worker.js', import.meta.url), 'utf8');
 
 test('favorites are split into clubs and matches and persist in this browser', () => {
-  assert.match(html, /readSet\('temp-rpl:favorite-clubs'\)/);
+  assert.match(html, /readSet\('temp-rpl:favorite-clubs','temp-rpl-favorites'\)/);
   assert.match(html, /readSet\('temp-rpl:favorite-matches'\)/);
   assert.match(html, /persistSet\('temp-rpl:favorite-clubs',favorites\)/);
   assert.match(html, /persistSet\('temp-rpl:favorite-matches',favoriteMatches\)/);
@@ -23,8 +23,7 @@ test('favorites screen and match scopes are wired in demo and live API views', (
   assert.match(html, /function favoritesPage\(\)/);
   assert.match(html, /function matchIsFollowed\(m\)/);
   assert.match(html, /data-match-scope="\$\{key\}"/);
-  assert.match(live, /function liveMatchesPage\(\)/);
-  assert.match(live, /data-match-scope="\$\{key\}"/);
+  assert.match(html, /m\.status==='soon':matchScope==='favorites'\?matchIsFollowed\(m\)/);
 });
 
 test('match and club follow controls expose pressed state and PWA shell caches the emblem', () => {

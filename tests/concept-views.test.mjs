@@ -3,24 +3,10 @@ import assert from 'node:assert/strict';
 import { readFileSync } from 'node:fs';
 
 const html = readFileSync(new URL('../index.html', import.meta.url), 'utf8');
-const liveData = readFileSync(new URL('../goal-data.js', import.meta.url), 'utf8');
 const views = readFileSync(new URL('../assets/concept-views.js', import.meta.url), 'utf8');
 const details = readFileSync(new URL('../assets/detail-screens.js', import.meta.url), 'utf8');
 const css = readFileSync(new URL('../assets/concept-views.css', import.meta.url), 'utf8');
 const worker = readFileSync(new URL('../service-worker.js', import.meta.url), 'utf8');
-
- test('match feed includes a real soon filter without removing live and favorites', () => {
-  assert.match(html, /matchScope==='soon'\?m\.status==='soon'/);
-  assert.match(html, /\['soon','Скоро',clubMatches\.filter\(m=>m\.status==='soon'\)\.length\]/);
-  assert.match(html, /\['live','В эфире',clubMatches\.filter\(m=>m\.status==='live'\)\.length\]/);
-  assert.match(html, /\['favorites','Избранное',clubMatches\.filter\(matchIsFollowed\)\.length\]/);
-  assert.match(liveData, /matchScope === 'soon' \? m\.status === 'soon'/);
-  assert.match(liveData, /\['soon', 'Скоро', clubMatches\.filter\(\(m\) => m\.status === 'soon'\)\.length\]/);
-  assert.match(liveData, /\['live', 'В эфире', clubMatches\.filter\(\(m\) => m\.status === 'live'\)\.length\]/);
-  assert.match(liveData, /\['favorites', 'Избранное', clubMatches\.filter\(matchIsFollowed\)\.length\]/);
-  assert.match(views, /title\.textContent = 'Матчи'/);
-  assert.match(css, /\.main\.concept-matches \.match-card/);
-});
 
 test('league form uses only scored, finished provider fixtures in newest-first order', () => {
   assert.match(views, /match\.status === 'finished'[\s\S]*scoreOf\(match\)/);

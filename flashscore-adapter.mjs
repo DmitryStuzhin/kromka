@@ -235,6 +235,32 @@ export function flashscoreRoster(players, teamCode) {
   };
 }
 
+export function predictFlashscoreLineup(players, teamCode) {
+  if (!teamCode) return null;
+  const groups = { GK: [], DF: [], MF: [], FW: [] };
+  const byId = new Map();
+  for (const p of Array.isArray(players) ? players : []) {
+    if (p?.t !== teamCode || !Object.hasOwn(groups, p.p) || !p.id || !String(p.n || '').trim()) continue;
+    const minutes = Array.isArray(p.lg) ? intOrNull(p.lg[1]) : null;
+    if (!minutes) continue;
+    const id = String(p.id);
+    const existing = byId.get(id);
+    if (existing && (existing.minutes > minutes || (existing.minutes === minutes && existing.p.localeCompare(p.p) <= 0))) continue;
+    byId.set(id, { ...p, id, minutes });
+  }
+  for (const p of byId.values()) groups[p.p].push(p);
+  for (const group of Object.values(groups)) group.sort((a, b) => b.minutes - a.minutes || (intOrNull(b.lg[0]) || 0) - (intOrNull(a.lg[0]) || 0) || a.id.localeCompare(b.id));
+  const shape = [[4, 3, 3], [4, 4, 2], [4, 5, 1]].find(([d, m, f]) =>
+    groups.GK.length && groups.DF.length >= d && groups.MF.length >= m && groups.FW.length >= f);
+  if (!shape) return null;
+  const [d, m, f] = shape;
+  const startingLineups = [...groups.GK.slice(0, 1), ...groups.DF.slice(0, d), ...groups.MF.slice(0, m), ...groups.FW.slice(0, f)].map(p => ({
+    id: p.id, name: String(p.n).trim(), number: p.no ?? '', type: POSITION_NAMES[p.p], playerPosition: POSITION_NAMES[p.p],
+    age: intOrNull(p.age), minutes: p.minutes
+  }));
+  return { formation: shape.join('-'), startingLineups };
+}
+
 export function flashscoreRosterById(players, teamCode) {
   const output = new Map();
   for (const player of Array.isArray(players) ? players : []) {

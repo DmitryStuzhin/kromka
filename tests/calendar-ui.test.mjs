@@ -12,7 +12,7 @@ function calendarContext() {
   const end = html.indexOf("\nlet tab='today'", start);
   assert.ok(start >= 0 && end > start, 'calendar helper block should be present');
   const context = { Intl, Date, Array, Math, Number };
-  runInNewContext(`${html.slice(start, end)}\nfunction render() {}`, context);
+  runInNewContext(`${html.slice(start, end)}\nfunction render() {}\nconst screen = { querySelector: () => null };`, context);
   return context;
 }
 
@@ -36,25 +36,41 @@ test('calendar weeks always contain seven consecutive Moscow dates, with selecta
   assert.equal(runInNewContext('selectedDate', context), '2026-11-02');
 });
 
-test('home and the Matches tab share the week controls but render separate daily and weekly views', () => {
-  assert.match(html, /function home\(\)[\s\S]*?\$\{weekControls\(\)\}\$\{dateRail\(\)\}/);
-  assert.match(html, /function matchesPage\(\)[\s\S]*?\$\{weekControls\(\)\}\$\{dateRail\(\)\}/);
-  assert.match(html, /data-tab="matches"/);
-  assert.match(html, /matches:window\.matchesPage\|\|matchesPage/);
-  assert.match(html, /calendarDates\.map\(iso=>/);
-  assert.match(html, /chooseCalendarDate\(b\.dataset\.day\)/);
-  assert.match(html, /data-week-shift/);
-});
-
-test('empty calendar days stay empty and demo/live fixtures are filtered by their actual date keys', () => {
-  assert.doesNotMatch(live, /const offsets\s*=\s*\[-1,\s*0,\s*1,\s*6,\s*7,\s*13,\s*14\]/);
-  assert.match(html, /dateKey:'2026-11-02'/);
-  assert.match(html, /В расписании на эту дату матчей нет\./);
-  assert.match(live, /m\.dateKey === selectedIso\(\)/);
-  assert.match(live, /m\.dateKey >= calendarDates\[0\].*m\.dateKey <= calendarDates\[6\]/);
-  assert.match(live, /В расписании \$\{safe\(dataProviderName\(\)\)\} на эту дату матчей нет\./);
-  assert.match(html, /дни без матчей не заполняются демо-играми/);
-  assert.match(live, /Дни без матчей показаны пустыми, без демо-игр/);
+test('daily summary, calendar and followed fixtures serve different purposes', () => {
+  const context = calendarContext();
+  const start = html.indexOf('function dateRail()');
+  const end = html.indexOf('function comparisonCard()', start);
+  Object.assign(context, {
+    window: {isLiveData:true}, clubs: {din:{short:'Динамо'}}, standings:[], filterClub:'all', matchScope:'all', matches:[
+      {id:'late',dateKey:'2026-11-07',round:14,kickoff:'19:30',status:'finished',score:'1:0',home:'din'},
+      {id:'early',dateKey:'2026-11-07',round:14,kickoff:'14:00',status:'live',score:'2:0'},
+      {id:'tomorrow',dateKey:'2026-11-08',round:14,kickoff:'16:15',status:'soon',score:'16:15',home:'din'},
+    ],
+    clubBadge: ()=>'', favorites: new Set(['din']), favoriteMatches: new Set(['late']), escapeMarkup: String,
+  });
+  runInNewContext(`${html.slice(start,end)}\nmoscowDateKey=()=> '2026-11-07'; setCalendarWeek('2026-11-02','2026-11-07');`, context);
+  const render = () => runInNewContext('matchesPage()', context);
+  const matchIds = (markup=render()) => [...markup.matchAll(/data-match="([^"]+)"/g)].map(row=>row[1]);
+  const today = runInNewContext('home()', context);
+  assert.deepEqual(matchIds(today), ['tomorrow','early','late']);
+  assert.match(today, /data-open-schedule/);
+  assert.doesNotMatch(today, /data-week-shift/);
+  const favoritesPage = runInNewContext('favoritesPage()', context);
+  assert.deepEqual(matchIds(favoritesPage), ['tomorrow','late']);
+  assert.match(favoritesPage, /Мой клуб/);
+  assert.match(render(), /data-week-shift/);
+  assert.match(render(), /tracked-day-dot/);
+  assert.deepEqual(matchIds(), ['early','late']);
+  context.matchScope='live';
+  assert.deepEqual(matchIds(), ['early']);
+  context.matchScope='favorites';
+  assert.deepEqual(matchIds(), ['late']);
+  runInNewContext("matchdayRange=true; matchScope='soon';",context);
+  assert.deepEqual(matchIds(), ['tomorrow']);
+  runInNewContext("matchdayRange=false; matchScope='all'; chooseCalendarDate(0);",context);
+  assert.deepEqual(matchIds(), []);
+  assert.match(render(), /На эту дату матчей нет\./);
+  assert.match(live, /dateKey: iso, kickoff: kick/);
 });
 
 test('seven-day date rail fits mobile widths and all five primary tabs remain', () => {

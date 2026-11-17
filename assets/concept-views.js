@@ -86,62 +86,27 @@
     const sourceNote = screen.querySelector('.source-note');
     if (sourceNote) {
       sourceNote.textContent = window.isLiveData
-        ? `Таблица: GOAL API · сезон 2026/27. Форма построена только по завершённым матчам из загруженной истории${window.fixtureHistoryComplete === false ? '; история поставщика неполная' : ''}.`
+        ? `Таблица: ${window.rplStandingsProvider || window.rplDataProvider} · сезон 2026/27. Форма построена только по завершённым матчам из загруженной истории${window.fixtureHistoryComplete === false ? '; история поставщика неполная' : ''}.`
         : 'Демонстрационный срез таблицы · не live-данные. Форма построена только по завершённым матчам, доступным в этом срезе.';
     }
   }
 
-  function decorateMatchNavigation() {
-    const nav = screen.querySelector('.detail-anchor-nav');
-    if (!nav || nav.dataset.conceptLayout === 'true') return;
-
-    const anchors = [...nav.querySelectorAll('button[data-detail-anchor]')];
-    const byTarget = new Map(anchors.map((button) => [button.dataset.detailAnchor, button]));
-    const overview = byTarget.get('match-events');
-    const statistics = byTarget.get('match-statistics');
-    const lineups = byTarget.get('matchLineupsSection');
-    if (!overview || !statistics || !lineups) return;
-
-    const primary = document.createElement('div');
-    primary.className = 'detail-anchor-primary';
-    const extra = document.createElement('div');
-    extra.className = 'detail-anchor-extra';
-    overview.textContent = 'Обзор';
-    overview.classList.add('active');
-    [overview, statistics, lineups].forEach((button) => {
-      button.addEventListener('click', () => {
-        primary.querySelectorAll('button').forEach((item) => item.classList.remove('active'));
-        button.classList.add('active');
-      });
-      primary.append(button);
-    });
-    anchors.filter((button) => ![overview, statistics, lineups].includes(button)).forEach((button) => extra.append(button));
-    nav.replaceChildren(primary, extra);
-    nav.dataset.conceptLayout = 'true';
-  }
 
   function updateScreen() {
-    const isMatches = Boolean(screen.querySelector('.match-scope-row'));
     const isTable = Boolean(screen.querySelector('.standings'));
     const isDetail = Boolean(screen.querySelector('.match-detail-page'));
-    screen.classList.toggle('concept-matches', isMatches);
     screen.classList.toggle('concept-table', isTable);
     screen.classList.toggle('concept-detail', isDetail);
 
-    if (isMatches) {
-      const title = screen.querySelector('.page-title');
-      if (title && title.textContent.trim() === 'Календарь') title.textContent = 'Матчи';
-    }
     if (isTable) {
       const pageDate = screen.querySelector('.page-head .page-date');
       if (pageDate) pageDate.textContent = window.isLiveData ? 'Сезон 2026/27' : 'Демо-данные';
       const tableTitle = screen.querySelector('.table-title');
       if (tableTitle) tableTitle.textContent = 'Турнирная таблица';
       const snapshot = screen.querySelector('.table-snapshot');
-      if (snapshot) snapshot.textContent = window.isLiveData ? 'GOAL API · 2026/27' : 'Демо-срез · не live';
+      if (snapshot) snapshot.textContent = window.isLiveData ? `${window.rplStandingsProvider || window.rplDataProvider} · 2026/27` : 'Демо-срез · не live';
       decorateTable();
     }
-    if (isDetail) decorateMatchNavigation();
   }
 
   const observer = new MutationObserver(() => requestAnimationFrame(updateScreen));
