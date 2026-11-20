@@ -465,16 +465,6 @@ button:focus-visible, a:focus-visible, [tabindex]:focus-visible {
   display: flex;
   flex-direction: column;
 }
-.main.concept-detail .match-detail-page > .detail-toolbar { order: 0; }
-.main.concept-detail .match-detail-page > .match-detail-hero { order: 1; }
-.main.concept-detail .match-detail-page > .detail-anchor-nav { order: 2; }
-.main.concept-detail .match-detail-page > .match-events-card { order: 3; }
-.main.concept-detail .match-detail-page > .match-stats-card { order: 4; }
-.main.concept-detail .match-detail-page > .lineups-card { order: 5; }
-.main.concept-detail .match-detail-page > .season-compare-card { order: 6; }
-.main.concept-detail .match-detail-page > .h2h-card { order: 7; }
-.main.concept-detail .match-detail-page > .form-card { order: 8; }
-.main.concept-detail .match-detail-page > .detail-data-note { order: 9; }
 .main.concept-detail .detail-toolbar {
   min-height: 44px;
   margin: 4px 0 8px;

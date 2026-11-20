@@ -1,6 +1,6 @@
 (() => {
   const escape = (value) => String(value ?? '').replace(/[&<>"']/g, (ch) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[ch]));
-  const detailSource = () => window.isLiveData ? 'GOAL API · СЕЗОН 2026/27' : 'ДЕМО-СРЕЗ · НЕ LIVE';
+  const detailSource = () => window.isLiveData ? 'РПЛ · 2026/27' : 'Демо';
   let detailRoute = null;
   let installedDetailRender = null;
   let installedOpenMatch = null;
@@ -24,11 +24,6 @@
     const other = match.home === key ? score[1] : score[0];
     return own > other ? 'win' : own === other ? 'draw' : 'loss';
   }
-  function recentForm(key, limit = 5) {
-    return (matches || []).filter((match) => match.status === 'finished' && (match.home === key || match.away === key) && scoreOf(match))
-      .sort((a, b) => String(b.dateKey).localeCompare(String(a.dateKey)) || String(b.time).localeCompare(String(a.time)))
-      .slice(0, limit).map((match) => ({ match, result: resultForTeam(match, key), opponent: match.home === key ? match.away : match.home, score: scoreOf(match) }));
-  }
   function resultText(result) { return result === 'win' ? 'Победа' : result === 'draw' ? 'Ничья' : 'Поражение'; }
   function goalDifference(row) {
     const goals = String(row?.[5] || '').match(/\d+/g) || [];
@@ -36,7 +31,7 @@
   }
   function seasonCompare(match) {
     const home = standingFor(match.home); const away = standingFor(match.away);
-    if (!home && !away) return '<div class="empty-note">Таблица текущего сезона не пришла от поставщика.</div>';
+    if (!home && !away) return '<div class="empty-note">Таблица сезона пока недоступна.</div>';
     const analytics = window.rplSeasonAnalytics;
     const homeSplits = analytics?.teamSplits(matches, match.home);
     const awaySplits = analytics?.teamSplits(matches, match.away);
@@ -67,82 +62,43 @@
       <p class="detail-footnote">Место и общие показатели — из таблицы сезона. Домашние и гостевые разрезы учитывают только завершённые матчи в загруженной истории.</p>
     </section>`;
   }
-  function headToHead(match) {
-    const result = window.rplSeasonAnalytics?.headToHead(matches, match.home, match.away);
-    if (!result) return '';
-    const { matches: direct, summary } = result;
-    const scope = window.isLiveData ? (window.fixtureHistoryComplete === false ? 'ТЕКУЩИЙ СРЕЗ · ИСТОРИЯ НЕПОЛНАЯ' : 'СЕЗОН 2026/27') : 'ДЕМО-СРЕЗ · НЕ LIVE';
-    const list = direct.slice(0, 5).map((item) => {
-      const date = item.dateKey ? new Intl.DateTimeFormat('ru-RU', { day: 'numeric', month: 'short' }).format(new Date(`${item.dateKey}T12:00:00`)) : 'Дата не указана';
-      return `<div class="h2h-result"><small>${escape(date)} · тур ${escape(item.round || '—')}</small><span>${clubBadge(item.home, 'form-crest')}<b>${escape(teamLabel(item.home))}</b><strong>${escape(item.score)}</strong><b>${escape(teamLabel(item.away))}</b>${clubBadge(item.away, 'form-crest')}</span></div>`;
-    }).join('');
-    const summaryLine = `${teamLabel(match.home)} ${summary.first} · ${summary.draws} ничьих · ${summary.second} ${teamLabel(match.away)}`;
-    const note = window.isLiveData
-      ? (window.fixtureHistoryComplete === false ? 'Очные результаты найдены только в неполной загруженной истории текущего сезона.' : 'Учтены только завершённые очные матчи сезона 2026/27; это не полная история клубов.')
-      : 'Демо-примеры нужны только для проверки интерфейса и не являются фактической историей.';
-    return `<section class="detail-card h2h-card" id="match-h2h"><div class="detail-section-head"><div><span class="detail-kicker">ОЧНЫЕ ВСТРЕЧИ · ЗАВЕРШЁННЫЕ</span><h2>В этом сезоне</h2></div><span class="detail-source">${escape(scope)}</span></div>${direct.length ? `<div class="h2h-summary"><strong>${direct.length}</strong><span>${escape(summaryLine)}</span></div><div class="h2h-list">${list}</div>${direct.length > 5 ? `<p class="detail-footnote">Показаны 5 из ${direct.length} найденных матчей.</p>` : ''}` : `<div class="empty-note">В загруженной истории сезона завершённых очных матчей не найдено.</div>`}<p class="detail-footnote">${escape(note)}</p></section>`;
+  function formRow(item, key) {
+    const scores = scoreOf(item);
+    const result = key ? resultForTeam(item, key) : '';
+    const date = item.dateKey ? formatCalendarDate(item.dateKey, { day:'2-digit', month:'2-digit', year:'2-digit' }) : '—';
+    const team = id => `<span class="duel-team ${id === key ? 'is-focus' : ''}">${clubBadge(id)}<span>${escape(teamLabel(id))}</span></span>`;
+    return `<button type="button" class="duel-row" data-history-match="${escape(item.id)}"><time>${escape(date)}</time><span class="duel-names">${team(item.home)}${team(item.away)}</span><span class="duel-score">${scores.map(score => `<b>${score}</b>`).join('')}</span>${result ? `<span class="duel-outcome ${result}" aria-label="${resultText(result)}" title="${resultText(result)}">${result === 'win' ? 'В' : result === 'draw' ? 'Н' : 'П'}</span>` : ''}</button>`;
   }
-  function formTeam(key) {
-    const form = recentForm(key);
-    const chips = form.map(({ result, opponent, score, match }) => {
-      const own = match.home === key ? score[0] : score[1];
-      const against = match.home === key ? score[1] : score[0];
-      return `<div class="form-result-card"><span class="form-result ${result}" aria-label="${resultText(result)}">${result === 'win' ? 'В' : result === 'draw' ? 'Н' : 'П'}</span><span class="form-opponent">${clubBadge(opponent, 'form-crest')}<small>${escape(teamLabel(opponent))}</small></span><b class="form-score">${own} : ${against}</b><small class="form-result-label">${resultText(result)}</small></div>`;
-    }).join('');
-    const record = standingFor(key);
-    const limitNote = form.length < 5
-      ? `<p class="detail-footnote">Показываем ${form.length} из 5 последних завершённых матчей${window.fixtureHistoryComplete === false ? '; история поставщика помечена как неполная' : ''}. Ничего не дополняем вымышленными результатами.</p>`
-      : '';
-    const seasonRecord = record ? `<span class="form-season-record">СЕЗОН · ${record[2]}–${record[3]}–${record[4]}</span>` : '';
-    return `<section class="form-team"><div class="form-team-head"><button type="button" data-detail-club="${escape(key)}">${clubBadge(key, 'form-team-crest')}<strong>${escape(teamLabel(key))}</strong></button><span>${teamRank(key) ? `№ ${teamRank(key)} · ${record?.[6] ?? '—'} оч. · ${form.length}/5` : `${form.length}/5 матчей`}</span></div><div class="form-five" aria-label="${escape(teamLabel(key))}: последние ${form.length} результата">${chips || '<div class="empty-note">В загруженной истории нет завершённых матчей.</div>'}</div>${seasonRecord}${limitNote}</section>`;
+  function historyGroup(title, rows, key = '') {
+    return `<section class="duel-group"><h3>${escape(title)}</h3>${rows.length ? rows.slice(0, 5).map(item => formRow(item, key)).join('') : '<p class="duel-empty">В этом сезоне таких матчей пока нет.</p>'}${rows.length > 5 ? `<details class="duel-more"><summary>Показать ещё <span>${rows.length - 5}</span></summary>${rows.slice(5).map(item => formRow(item, key)).join('')}</details>` : ''}</section>`;
+  }
+  function matchHistory(match, filter = 'all') {
+    const earlier = matches.filter(item => item.status === 'finished' && item.id !== match.id && scoreOf(item) &&
+      (!match.dateKey || compareMatchTimes(item, match) < 0)).sort((a,b) => compareMatchTimes(b,a));
+    const presets = [['all','Все матчи'], ['home', teamLabel(match.home) + ' дома'], ['away', teamLabel(match.away) + ' в гостях']];
+    const teamResults = (key, side) => earlier.filter(item => side ? item[side] === key : item.home === key || item.away === key);
+    const direct = earlier.filter(item => (item.home === match.home && item.away === match.away) ||
+      (filter === 'all' && item.home === match.away && item.away === match.home));
+    return `<section id="match-form" class="match-history"><div class="duel-filters" role="group" aria-label="Где играли">${presets.map(([key,label]) => `<button type="button" data-history-filter="${key}" aria-pressed="${key === filter}">${escape(label)}</button>`).join('')}</div>
+      ${filter !== 'away' ? historyGroup('Последние матчи: ' + teamLabel(match.home), teamResults(match.home, filter === 'all' ? '' : 'home'), match.home) : ''}
+      ${filter !== 'home' ? historyGroup('Последние матчи: ' + teamLabel(match.away), teamResults(match.away, filter === 'all' ? '' : 'away'), match.away) : ''}
+      <div id="match-h2h">${historyGroup('Очные встречи · РПЛ 2026/27', direct)}</div></section>`;
   }
   function eventList(match) {
     const events = Array.isArray(match.events) ? match.events : [];
     if (!events.length) {
       const state = match.detailDataStatus?.events;
-      const message = match.status === 'soon' ? 'До стартового свистка событий матча ещё нет.' : state === 'failed' ? 'Не удалось получить события. Попробуйте открыть матч позже.' : state === 'empty' ? 'Источник не передал события этого матча.' : window.isLiveData ? 'Загружаем ход матча…' : 'В демо-данных нет событий этого матча.';
+      const message = match.status === 'soon' ? 'До стартового свистка событий матча ещё нет.' : state === 'failed' ? 'Не удалось получить события. Попробуйте открыть матч позже.' : state === 'empty' ? 'Хронология этого матча недоступна.' : window.isLiveData ? 'Загружаем ход матча…' : 'В демо-данных нет событий этого матча.';
       return `<div class="empty-note">${message}</div>`;
     }
-    const minuteValue = (value) => {
-      const found = String(value || '').match(/(\d+)(?:\s*\+\s*(\d+))?/);
-      return found ? Number(found[1]) + Number(found[2] || 0) / 100 : null;
-    };
-    const ordered = events.map((event, index) => ({ event, index, minute: minuteValue(event[0]) }));
-    if (ordered.every((item) => item.minute !== null)) ordered.sort((a, b) => a.minute - b.minute || a.index - b.index);
-    const home = clubs[match.home] || {}; const away = clubs[match.away] || {};
-    const belongsTo = (team, key) => {
-      const label = String(team || '').toLocaleLowerCase('ru-RU');
-      const club = clubs[key] || {};
-      if (label && window.rplClubKeyForName?.(label) === key) return true;
-      return Boolean(label) && [club.short, club.name].filter(Boolean).some((name) => {
-        const normalized = String(name).toLocaleLowerCase('ru-RU');
-        return label.includes(normalized) || normalized.includes(label);
-      });
-    };
-    const kindOf = (text) => /гол|goal|пенальти|автогол/i.test(text) ? 'goal' : /красн|удалени|red card/i.test(text) ? 'red-card' : /ж[её]лт|yellow card/i.test(text) ? 'yellow-card' : /замен|substitution/i.test(text) ? 'substitution' : 'event';
-    const showHalves = ordered.every((item) => item.minute !== null) && ordered.some((item) => item.minute < 46) && ordered.some((item) => item.minute >= 46);
-    const list = [];
-    if (showHalves) list.push('<li class="timeline-period"><span>Первый тайм</span></li>');
-    let markedSecondHalf = false;
-    ordered.forEach(({ event, minute }) => {
-      if (showHalves && !markedSecondHalf && minute >= 46) {
-        list.push('<li class="timeline-period"><span>Второй тайм</span></li>');
-        markedSecondHalf = true;
-      }
-      const isHome = belongsTo(event[2], match.home); const isAway = !isHome && belongsTo(event[2], match.away);
-      const side = isHome ? 'home' : isAway ? 'away' : 'unknown';
-      const kind = kindOf(String(event[1] || ''));
-      const team = isHome ? (home.short || home.name) : isAway ? (away.short || away.name) : event[2];
-      list.push(`<li class="timeline-event ${side} event-${kind}"><div class="timeline-event-copy"><small>${escape(team || 'Матч')}</small><span>${escape(event[1])}</span></div><time>${escape(event[0])}</time></li>`);
-    });
-    return `<ol class="match-timeline" aria-label="События матча по времени">${list.join('')}</ol>`;
+    return window.rplMatchChronology.render(match, clubs, window.rplClubKeyForName);
   }
   function matchStats(match) {
-    if (match.status === 'soon') return '<div class="empty-note">Статистика появится после стартового свистка. Предматчевые нули здесь не показываем.</div>';
+    if (match.status === 'soon') return '';
     const stats = Array.isArray(match.stats) ? match.stats : [];
     if (!stats.length) {
       const state = match.detailDataStatus?.statistics;
-      return `<div class="empty-note">${state === 'failed' ? 'Не удалось получить статистику GOAL API. Попробуйте открыть матч позже.' : state === 'empty' ? 'GOAL API не передал статистику для этого матча.' : 'Показатели матча не пришли в ответе поставщика.'}</div>`;
+      return `<div class="empty-note">${state === 'failed' ? 'Не удалось обновить статистику. Попробуйте позже.' : state === 'empty' ? 'Статистика этого матча недоступна.' : 'Загружаем статистику…'}</div>`;
     }
     const numeric = (value) => {
       const token = String(value ?? '').replace(/,/g, '.').match(/[+-]?(?:\d+(?:\.\d+)?|\.\d+)/);
@@ -150,61 +106,148 @@
     };
     const home = clubs[match.home] || {}; const away = clubs[match.away] || {};
     const legend = `<div class="match-stats-legend"><span><i class="home"></i>${escape(home.short || home.name || 'Хозяева')}</span><span><i class="away"></i>${escape(away.short || away.name || 'Гости')}</span></div>`;
-    const rows = stats.map(([label, homeValue, awayValue, homeRaw, awayRaw]) => {
+    const possession=stats.find(row=>/влад|possession/i.test(row[0]));
+    const possessionValues=possession?[numeric(possession[3]??possession[1]),numeric(possession[4]??possession[2])]:[];
+    const hasPossession=possessionValues.length===2&&possessionValues.every(n=>n>=0&&n<=100)&&Math.abs(possessionValues[0]+possessionValues[1]-100)<1;
+    const rings=hasPossession?`<section class="possession-chart" aria-label="Владение мячом"><h4>Владение мячом</h4><div class="possession-rings">${possessionValues.map((value,i)=>`<div class="possession-team ${i?'away':'home'}"><div class="possession-ring"><svg viewBox="0 0 100 100" role="img" aria-label="${escape(i?away.short:home.short)}: ${value}%"><circle class="possession-track" cx="50" cy="50" r="39"/><circle class="possession-value" cx="50" cy="50" r="39" pathLength="100" stroke-dasharray="${value} ${100-value}" transform="rotate(-90 50 50)"/></svg><b>${value}%</b></div><span>${escape(i?away.short:home.short)}</span></div>`).join('')}</div></section>`:'';
+    const grouped=window.rplMatchPresentation.statGroups(stats.filter(row=>!hasPossession||!/влад|possession/i.test(row[0])));
+    const statDisplay=value=>{
+      const text=String(value??'—'),percent=text.match(/^([\d.,]+%)\s*\(([^)]+)\)$/);
+      return percent?`${escape(percent[1])}<small class="match-stat-context">${escape(percent[2])}</small>`:escape(/^\d+\.\d+$/.test(text)?text.replace('.',','):text);
+    };
+    const renderRows=items=>items.map(([label, homeValue, awayValue, homeRaw, awayRaw]) => {
       const homeNumber = numeric(homeRaw ?? homeValue); const awayNumber = numeric(awayRaw ?? awayValue);
-      const max = Math.max(homeNumber, awayNumber, 0);
-      const homeWidth = max ? Math.max(0, homeNumber) / max * 100 : 0;
-      const awayWidth = max ? Math.max(0, awayNumber) / max * 100 : 0;
-      return `<div class="match-stat-row"><div class="match-stat-values"><b>${escape(homeValue)}</b><span>${escape(label)}</span><b>${escape(awayValue)}</b></div><div class="match-stat-bars" aria-hidden="true"><span class="match-stat-track home"><i style="width:${homeWidth}%"></i></span><span class="match-stat-track away"><i style="width:${awayWidth}%"></i></span></div></div>`;
+      const total = Math.max(0,homeNumber)+Math.max(0,awayNumber);
+      const homeWidth = total ? Math.max(0, homeNumber) / total * 100 : 0;
+      const awayWidth = total ? Math.max(0, awayNumber) / total * 100 : 0;
+      return `<div class="match-stat-row"><div class="match-stat-values"><b>${statDisplay(homeValue)}</b><span>${escape(label)}</span><b>${statDisplay(awayValue)}</b></div><div class="match-stat-bars" aria-hidden="true"><span class="match-stat-track home" style="width:${homeWidth}%"><i></i></span><span class="match-stat-track away" style="width:${awayWidth}%"><i></i></span></div></div>`;
     }).join('');
-    return `${legend}<div class="match-stats-list">${rows}</div><p class="detail-footnote">Длина шкалы в каждой строке показывает соотношение значений этого показателя. ${window.isLiveData ? 'Числа переданы поставщиком для этого матча.' : 'Демо-значения для проверки интерфейса, не live-данные.'}</p>`;
+    const extra=grouped.groups.length?`<details class="match-stat-more"><summary>Все показатели</summary>${grouped.groups.map(([title,items])=>`<section class="match-stat-group"><h4>${escape(title)}</h4><div class="match-stats-list">${renderRows(items)}</div></section>`).join('')}</details>`:'';
+    return `${legend}${rings}<div class="match-stats-list">${renderRows(grouped.primary)}</div>${extra}${window.isLiveData?'':'<p class="detail-footnote">Демонстрационные данные.</p>'}`;
   }
   function matchPage(match) {
     const home = clubs[match.home] || {}; const away = clubs[match.away] || {};
     const dateLabel = match.dateKey ? formatCalendarDate(match.dateKey) : match.date;
     const matchTime = fixtureKickoff(match);
-    const status = match.status === 'soon' ? (matchTime ? 'Не начался' : 'Время уточняется') : match.status === 'live' ? `В игре${/^\d+(?:\+\d+)?′$/.test(match.time) ? ` · ${match.time}` : ''}` : 'Завершён';
+    const status = match.status === 'soon' ? (matchTime ? 'Не начался' : 'Время уточняется') : match.status === 'live' ? (match.time === 'Перерыв' ? 'Перерыв' : /^\d+(?:\+\d*)?′$/.test(match.time) ? match.time : 'Минута уточняется') : 'Завершён';
     const followed = favoriteMatches.has(String(match.id));
-    const standingsCaption = [teamRank(match.home) && `${teamRank(match.home)}-е место`, teamRank(match.away) && `${teamRank(match.away)}-е место`].filter(Boolean).join(' · ');
     const eventCount = Array.isArray(match.events) ? match.events.length : 0;
     const eventCountMod100 = eventCount % 100; const eventCountMod10 = eventCount % 10;
     const eventCountLabel = eventCount ? `${eventCount} ${eventCountMod100 >= 11 && eventCountMod100 <= 14 ? 'событий' : eventCountMod10 === 1 ? 'событие' : eventCountMod10 >= 2 && eventCountMod10 <= 4 ? 'события' : 'событий'}` : detailSource();
-    return `<div class="detail-page match-detail-page">
-      <div class="detail-toolbar"><div class="matchday-detail-leading"><span class="matchday-mark" aria-hidden="true"></span><button type="button" class="detail-back" data-detail-back aria-label="Назад"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M20 12H4m7-7-7 7 7 7"/></svg></button></div><h1 class="detail-toolbar-label">Матч</h1><button type="button" class="detail-star matchday-star ${followed ? 'selected' : ''}" data-detail-favorite="${escape(match.id)}" aria-pressed="${followed}" aria-label="${followed ? 'Убрать матч из избранного' : 'Добавить матч в избранное'}">${matchdayStar}</button></div>
+    return `<div class="detail-page match-detail-page" data-status="${escape(match.status)}" style="${window.rplMatchPresentation?.dualStyle(home,away)||''}">
+      <div class="detail-toolbar"><div class="matchday-detail-leading">${favoriteClubShortcut()}<button type="button" class="detail-back" data-detail-back aria-label="Назад"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M20 12H4m7-7-7 7 7 7"/></svg></button></div><h1 class="detail-toolbar-label">Матч</h1><button type="button" class="detail-star matchday-star ${followed ? 'selected' : ''}" data-detail-favorite="${escape(match.id)}" aria-pressed="${followed}" aria-label="${followed ? 'Убрать матч из избранного' : 'Добавить матч в избранное'}">${matchdayStar}</button></div>
       <header class="match-detail-hero"><div class="detail-kicker">РПЛ${match.round ? ` · ${escape(match.round)}-й тур` : ''}</div><div class="match-detail-teams"><button type="button" class="detail-team-link" data-detail-club="${escape(match.home)}">${clubBadge(match.home, 'detail-team-crest')}<strong>${escape(home.short || home.name || 'Хозяева')}</strong></button><div class="match-detail-score"><span>${escape(match.status === 'soon' ? (matchTime || '—') : String(match.score || '—').replace(/\s+/g, ''))}</span><small class="${match.status === 'live' ? 'is-live' : ''}">${escape(status)}</small></div><button type="button" class="detail-team-link away" data-detail-club="${escape(match.away)}">${clubBadge(match.away, 'detail-team-crest')}<strong>${escape(away.short || away.name || 'Гости')}</strong></button></div><div class="match-detail-venue"><span>${escape(dateLabel)}${matchTime ? ` · ${escape(matchTime)} МСК` : ''}</span></div></header>
-      <nav class="detail-anchor-nav" data-concept-layout="true" aria-label="Разделы матча"><button type="button" data-detail-anchor="match-events" aria-controls="match-events">События</button><button type="button" data-detail-anchor="matchLineupsSection" aria-controls="matchLineupsSection">Составы</button><button type="button" data-detail-anchor="match-statistics" aria-controls="match-statistics">Статистика</button><button type="button" data-detail-anchor="match-h2h" aria-controls="match-h2h season-comparison match-form">Очные</button></nav>
-      <section class="detail-card lineups-card" id="matchLineupsSection"><div class="detail-section-head"><h2>Составы</h2></div><div id="matchLineups" class="match-lineups" aria-live="polite"><div class="empty-note">${window.isLiveData ? 'Загружаем составы…' : 'Стартовые составы пока не опубликованы'}</div></div></section>
-      ${seasonCompare(match)}
-      ${headToHead(match)}
-      <section class="detail-card form-card" id="match-form"><div class="detail-section-head"><div><span class="detail-kicker">ПОСЛЕДНИЕ ЗАВЕРШЁННЫЕ</span><h2>Форма команд</h2></div><span class="detail-source">ДО 5 ИГР</span></div><div class="match-form-grid">${formTeam(match.home)}${formTeam(match.away)}</div><div class="form-legend" aria-label="В означает победа, Н означает ничья, П означает поражение"><span><i class="win">В</i> Победа</span><span><i class="draw">Н</i> Ничья</span><span><i class="loss">П</i> Поражение</span></div></section>
-      <section class="detail-card match-events-card" id="match-events"><div class="detail-section-head"><div><span class="detail-kicker">ХОД МАТЧА</span><h2>Хронология</h2></div><span class="detail-source">${eventCountLabel}</span></div>${eventList(match)}</section>
-      <section class="detail-card match-stats-card" id="match-statistics"><div class="detail-section-head"><div><span class="detail-kicker">${match.status === 'soon' ? 'ПОСЛЕ СТАРТА' : 'ПО МАТЧУ'}</span><h2>Статистика матча</h2></div></div>${matchStats(match)}</section>
-      <p class="detail-data-note">${window.isLiveData ? [match.venue, window.rplDataProvider, standingsCaption].filter(Boolean).map(escape).join(' · ') : 'Демо-режим · расписание и результаты приведены как пример.'}</p>
+      <nav class="detail-anchor-nav" data-concept-layout="true" aria-label="Разделы матча"><button type="button" data-detail-anchor="match-events" aria-controls="match-events" ${match.status === 'soon' && !eventCount ? 'disabled title="События появятся после начала матча"' : ''}>События</button><button type="button" data-detail-anchor="matchLineupsSection" aria-controls="matchLineupsSection">Составы</button><button type="button" data-detail-anchor="match-statistics" aria-controls="match-statistics">Статистика</button></nav>
+      <section class="detail-card lineups-card" id="matchLineupsSection"><div class="detail-section-head"><h2>Составы</h2></div><div id="matchLineups" class="match-lineups" aria-live="polite"><div class="empty-note">${window.isLiveData ? 'Загружаем составы…' : 'Составы в демо недоступны.'}</div></div></section>
+      <section class="detail-card match-events-card" id="match-events"><div class="detail-section-head"><h2>Ход матча</h2><span class="detail-source">${eventCountLabel}</span></div>${eventList(match)}</section>
+      <div id="match-statistics">
+        ${match.status !== 'soon' ? `<section class="duel-group match-figures"><h3>Статистика матча</h3>${matchStats(match)}</section>` : ''}
+        ${matchHistory(match, detailRoute?.historyFilter)}
+        <details class="match-season-details"><summary>Сравнение в сезоне</summary>${seasonCompare(match)}</details>
+      </div>
+      ${match.venue ? `<p class="detail-data-note">${escape(match.venue)}</p>` : ''}
     </div>`;
   }
-  function playerProfilePage(player) {
+  const playerPositionLabels = { goalkeepers: 'Вратарь', goalkeeper: 'Вратарь', gk: 'Вратарь', defenders: 'Защитник', defender: 'Защитник', df: 'Защитник', midfielders: 'Полузащитник', midfielder: 'Полузащитник', mf: 'Полузащитник', forwards: 'Нападающий', forward: 'Нападающий', fw: 'Нападающий' };
+  function playerStatsPage(route) {
+    if (!route.profile) {
+      if (route.profileState === 'loading') return '<p class="player-profile-note" role="status">Загружаем статистику…</p>';
+      if (route.profileState === 'error') return '<p class="player-profile-note" role="status">Не удалось загрузить статистику. <button type="button" class="player-retry" data-player-retry>Повторить</button></p>';
+      return '<p class="player-profile-note">Статистика этого игрока пока недоступна.</p>';
+    }
+    const profile = route.profile;
+    const charts = window.rplStatsCharts;
+    const options = charts.careerCategories(profile);
+    const group = Object.hasOwn(options, route.careerGroup) ? route.careerGroup : Object.keys(options)[0];
+    const metric = Object.hasOwn(charts.metrics, route.careerMetric) ? route.careerMetric : 'goals';
+    const scope = route.seasonScope || (profile.league || !profile.all ? 'league' : 'all');
+    const seasonSelector = profile.all ? `<div class="stat-switch" role="group" aria-label="Турниры сезона">${[['league', 'РПЛ'], ['all', 'Все турниры клуба']].map(([key, title]) =>
+      `<button type="button" data-season-scope="${key}" aria-pressed="${scope === key}">${title}</button>`).join('')}</div>` : '<p class="stat-note stat-league-label">РПЛ</p>';
+    const select = (name, title, entries, current) => `<label>${title}<select data-career-select="${name}">${entries.map(([key, text]) =>
+      `<option value="${key}"${key === current ? ' selected' : ''}>${text}</option>`).join('')}</select></label>`;
+    const career = group ? `<section class="player-profile-section">
+      <div class="player-section-head"><h2>Карьера по сезонам</h2></div>
+      <div class="stat-selects" data-career-controls>
+        ${select('group', 'Турниры', Object.entries(options).map(([key, category]) => [key, category.label]), group)}
+        ${select('metric', 'Показатель', Object.entries(charts.metrics), metric)}
+      </div>
+      <div data-career-results aria-live="polite">${charts.careerContent(profile, options[group], metric)}</div>
+    </section>` : '';
+    return `<section class="player-profile-section"><div class="player-section-head"><h2>Статистика сезона</h2><span>${escape(charts.shortSeason(profile.season))}</span></div>
+      ${seasonSelector}<div data-season-content aria-live="polite">${charts.seasonContent(profile, scope)}</div></section>
+      ${career}
+      ${profile.careerUnavailable ? '<p class="player-profile-note">Не удалось загрузить историю карьеры. <button type="button" class="player-retry" data-player-retry>Повторить</button></p>' : ''}`;
+  }
+  function bindPlayerCharts(root, route) {
+    if (!route.profile) return;
+    const charts = window.rplStatsCharts;
+    const buttons = [...root.querySelectorAll('[data-season-scope]')];
+    buttons.forEach(button => button.addEventListener('click', () => {
+      const scope = button.dataset.seasonScope;
+      if (button.getAttribute('aria-pressed') === 'true') return;
+      route.seasonScope = scope;
+      buttons.forEach(item => item.setAttribute('aria-pressed', String(item === button)));
+      root.querySelector('[data-season-content]').innerHTML = charts.seasonContent(route.profile, scope);
+    }));
+    root.querySelector('[data-career-controls]')?.addEventListener('change', () => {
+      const options = charts.careerCategories(route.profile);
+      route.careerGroup = root.querySelector('[data-career-select="group"]').value;
+      route.careerMetric = root.querySelector('[data-career-select="metric"]').value;
+      root.querySelector('[data-career-results]').innerHTML = charts.careerContent(route.profile, options[route.careerGroup], route.careerMetric);
+    });
+  }
+  function playerProfilePage(route) {
+    const player = route.player;
+    const profile = route.profile;
     const key = player.team && clubs[player.team] ? player.team : '';
     const club = key ? clubs[key] : null;
-    const photo = /^https:\/\/(media\.goal-api\.com|media\.api-sports\.io)\//.test(player.photo || '') ? player.photo : '';
-    const initials = String(player.name || 'Игрок').trim().split(/\s+/).slice(0, 2).map((part) => Array.from(part)[0] || '').join('').toUpperCase();
-    return `<div class="detail-page player-detail-page">
-      <div class="detail-toolbar"><button type="button" class="detail-back" data-detail-back>← <span>Назад</span></button><span class="detail-toolbar-label">ПРОФИЛЬ ИГРОКА</span><span class="detail-toolbar-spacer"></span></div>
-      <header class="player-profile-hero"><div class="player-profile-avatar">${photo ? `<img src="${escape(photo)}" alt="" loading="lazy" referrerpolicy="no-referrer" onerror="this.hidden=true;this.nextElementSibling.hidden=false"><span hidden>${escape(initials || 'И')}</span>` : `<span>${escape(initials || 'И')}</span>`}</div><div class="player-profile-copy"><span class="detail-kicker">${escape(player.position || 'ИГРОК РПЛ')}</span><h1>${escape(player.name || 'Игрок')}</h1><div class="player-profile-club">${key ? `${clubBadge(key, 'player-club-crest')}<span>${escape(club.short || club.name)}</span>` : '<span>Клуб РПЛ</span>'}</div></div></header>
-      <section class="detail-card player-facts"><div class="player-fact"><span>Номер</span><b>${player.number ? `№ ${escape(player.number)}` : '—'}</b></div><div class="player-fact"><span>Позиция</span><b>${escape(player.position || '—')}</b></div><div class="player-fact"><span>Возраст</span><b>${player.age ? `${escape(player.age)} лет` : '—'}</b></div></section>
-      <section class="detail-card"><div class="detail-section-head"><div><span class="detail-kicker">2026/27</span><h2>Статистика сезона</h2></div><span class="detail-source">${detailSource()}</span></div><div class="player-stats-unavailable"><strong>Личная сезонная статистика пока недоступна</strong><p>Подключённый источник передаёт состав и матчевые lineups, но не даёт в этом приложении сезонные показатели игрока. Поэтому матчи, голы и карточки не оцениваются по неполной выборке.</p></div></section>
-      ${key ? `<section class="detail-card player-club-link-card"><span class="detail-kicker">КОМАНДА</span><button type="button" data-detail-club="${escape(key)}">${clubBadge(key, 'player-club-crest')}<strong>Открыть профиль ${escape(club.short || club.name)}</strong><span aria-hidden="true">↗</span></button></section>` : ''}
-      <p class="detail-data-note">Состав и доступные сведения — GOAL API${player.photo ? ' · портрет проверенного источника изображений' : ''}. Возраст, номер и позиция показываются только если пришли от источника.</p>
+    const name = profile?.name || player.name || 'Игрок';
+    const position = playerPositionLabels[String(player.position || '').trim().toLowerCase()] || player.position || '';
+    const photo = window.rplPlayerPhotoUrl?.(profile?.photo || player.photo) || '';
+    const initials = name.trim().split(/\s+/).slice(0, 2).map(part => Array.from(part)[0] || '').join('').toUpperCase();
+    const age = profile?.age ?? player.age;
+    const number = player.number || profile?.number;
+    const facts = [
+      ['Номер', number ? `№ ${number}` : ''], ['Позиция', position],
+      ['Возраст', age], ['Дата рождения', profile?.birthDate], ['Страна', profile?.nationality],
+      ['Оценочная стоимость', profile?.marketValue], ['Контракт до', profile?.contractUntil]
+    ].filter(([, value]) => value != null && value !== '');
+    return `<div class="detail-page player-detail-page" style="${window.rplMatchPresentation?.clubStyle(club)||''}">
+      <div class="detail-toolbar"><button type="button" class="detail-back" data-detail-back aria-label="Назад"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M20 12H4m7-7-7 7 7 7"/></svg></button><span class="detail-toolbar-label">Профиль игрока</span><span class="detail-toolbar-spacer"></span></div>
+      <header class="player-profile-hero"><div class="player-profile-avatar"><span aria-hidden="true">${escape(initials)}</span>${photo ? `<img src="${escape(photo)}" alt="" decoding="async" referrerpolicy="no-referrer" onerror="this.hidden=true">` : ''}</div>
+      <div class="player-profile-copy"><h1>${escape(name)}</h1>${key ? `<button type="button" class="player-profile-club" data-detail-club="${escape(key)}">${clubBadge(key, 'player-club-crest')}<span>${escape(club.short || club.name)}</span></button>` : ''}</div></header>
+      ${facts.length ? `<dl class="player-facts">${facts.map(([label, value]) => `<div><dt>${label}</dt><dd>${escape(value)}</dd></div>`).join('')}</dl>` : ''}
+      <div aria-busy="${route.profileState === 'loading'}">${playerStatsPage(route)}</div>
     </div>`;
   }
   function playerFromButton(button) {
     return {
-      name: button.dataset.playerName || 'Игрок', number: button.dataset.playerNumber || '',
-      position: button.dataset.playerPosition || '', age: button.dataset.playerAge || '',
-      photo: button.dataset.playerPhoto || '', team: button.dataset.playerTeam || ''
+      id: button.dataset.playerId || '', name: button.dataset.playerName || 'Игрок',
+      number: button.dataset.playerNumber || '', position: button.dataset.playerPosition || '',
+      age: button.dataset.playerAge || '', photo: button.dataset.playerPhoto || '', team: button.dataset.playerTeam || ''
     };
+  }
+  async function loadPlayerProfile(route) {
+    const player = route.player;
+    const teamId = clubs[player.team]?.apiId;
+    if (!teamId) return;
+    const query = new URLSearchParams({ id: player.id, name: player.name, number: player.number });
+    route.profileState = 'loading';
+    if (detailRoute === route) renderRoute();
+    try {
+      const response = await fetch(`/api/teams/${encodeURIComponent(teamId)}/player?${query}`);
+      if (response.status === 404) route.profileState = 'missing';
+      else if (!response.ok) throw new Error('Profile request failed');
+      else {
+        route.profile = await response.json();
+        route.profileState = 'ready';
+      }
+    } catch { route.profileState = 'error'; }
+    if (detailRoute === route) renderRoute();
   }
   function renderRoute() {
     if (!detailRoute) return false;
+    renderHeaderClub();
     const root = document.getElementById('screen');
     if (!root) return true;
     if (detailRoute.type === 'match') {
@@ -230,13 +273,24 @@
         if (target === 'matchLineupsSection') window.loadMatchLineups?.(match);
       };
       buttons.forEach(button => button.addEventListener('click', () => select(button.dataset.detailAnchor)));
-      select(detailRoute.panel || 'match-events');
+      const initial = buttons.find(button => button.dataset.detailAnchor === detailRoute.panel && !button.disabled);
+      select(initial?.dataset.detailAnchor || (buttons[0].disabled ? 'match-statistics' : 'match-events'));
+      root.querySelectorAll('[data-history-filter]').forEach(button => button.addEventListener('click', () => {
+        detailRoute.historyFilter = button.dataset.historyFilter;
+        renderRoute();
+        [...root.querySelectorAll('[data-history-filter]')].find(item => item.dataset.historyFilter === detailRoute.historyFilter)?.focus({preventScroll:true});
+      }));
+      root.querySelectorAll('[data-history-match]').forEach(button => button.addEventListener('click', () => openMatchDetail(button.dataset.historyMatch, detailRoute)));
       buttons.find(button => button.dataset.detailAnchor === focusedTab)?.focus({preventScroll:true});
       if (focusedStar) root.querySelector('[data-detail-favorite]')?.focus({preventScroll:true});
-      if (window.loadMatchInsights) requestAnimationFrame(() => { if (detailRoute?.type === 'match' && detailRoute.id === String(match.id)) window.loadMatchInsights(match); });
+      if (window.loadMatchInsights) queueMicrotask(() => { if (detailRoute?.type === 'match' && detailRoute.id === String(match.id)) window.loadMatchInsights(match); });
     } else if (detailRoute.type === 'player') {
       root.classList.remove('matchday-detail');
-      root.innerHTML = playerProfilePage(detailRoute.player);
+      const backFocused = document.activeElement?.matches('[data-detail-back], [data-player-retry]');
+      root.innerHTML = playerProfilePage(detailRoute);
+      bindPlayerCharts(root, detailRoute);
+      root.querySelector('[data-player-retry]')?.addEventListener('click', () => loadPlayerProfile(detailRoute));
+      if (backFocused) root.querySelector('[data-detail-back]')?.focus({ preventScroll: true });
     }
     root.querySelectorAll('[data-detail-back]').forEach((button) => button.addEventListener('click', backFromDetail));
     root.querySelectorAll('[data-detail-club]').forEach((button) => button.addEventListener('click', () => openClub(button.dataset.detailClub)));
@@ -252,6 +306,7 @@
   function openClub(key) {
     if (!clubs[key]) return;
     detailRoute = null;
+    profileParent = null;
     selectedClub = key;
     clubSection = 'обзор';
     tab = 'club';
@@ -259,32 +314,37 @@
     window.scrollTo({ top: 0, behavior: 'instant' });
   }
   function backFromDetail() {
-    if (detailRoute?.type === 'player' && profileParent?.type === 'match') {
-      detailRoute = profileParent;
+    if (detailRoute?.type === 'player' && profileParent) {
+      const { route, scrollTop, player } = profileParent;
+      detailRoute = route;
       profileParent = null;
       window.render();
-      window.scrollTo({ top: 0, behavior: 'instant' });
-      return;
-    }
-    if (detailRoute?.type === 'player' && profileParent?.type === 'app') {
-      const top = profileParent.scrollTop;
-      detailRoute = null;
-      profileParent = null;
-      window.render();
-      window.scrollTo({ top, behavior: 'instant' });
+      window.scrollTo({ top: scrollTop, behavior: 'instant' });
+      const focusPlayer = () => [...document.querySelectorAll('[data-player-profile]')].find(button =>
+        button.dataset.playerTeam === player.team && (player.id ? button.dataset.playerId === player.id : button.dataset.playerName === player.name)
+      )?.focus({ preventScroll: true });
+      focusPlayer();
       return;
     }
     const top = detailRoute?.previousScroll || 0;
     const previousMatch = detailRoute?.id;
+    if (detailRoute?.parent) {
+      detailRoute = detailRoute.parent;
+      matchdaySelection = detailRoute.id;
+      window.render();
+      window.scrollTo({ top, behavior: 'instant' });
+      [...document.querySelectorAll('[data-history-match]')].find(button => button.dataset.historyMatch === previousMatch)?.focus({preventScroll:true});
+      return;
+    }
     detailRoute = null;
     window.render();
     window.scrollTo({ top, behavior: 'instant' });
     if (previousMatch) [...document.querySelectorAll('[data-match]')].find(button => button.dataset.match === previousMatch)?.focus({preventScroll:true});
   }
-  function openMatchDetail(id) {
+  function openMatchDetail(id, parent = null) {
     const match = matches.find((item) => String(item.id) === String(id));
     if (!match) return;
-    detailRoute = { type: 'match', id: String(id), previousScroll: window.scrollY || 0 };
+    detailRoute = { type: 'match', id: String(id), previousScroll: window.scrollY || 0, parent };
     matchdaySelection = String(id);
     modalMatch = match;
     window.render();
@@ -311,10 +371,13 @@
     const button = event.target.closest('[data-player-profile]');
     if (!button) return;
     event.preventDefault();
-    profileParent = detailRoute?.type === 'match' ? detailRoute : { type: 'app', scrollTop: window.scrollY || 0 };
-    detailRoute = { type: 'player', player: playerFromButton(button) };
+    const player = playerFromButton(button);
+    profileParent = { route: detailRoute?.type === 'match' ? detailRoute : null, scrollTop: window.scrollY || 0, player };
+    detailRoute = { type: 'player', player };
     window.render();
     window.scrollTo({ top: 0, behavior: 'instant' });
+    document.querySelector('#screen [data-detail-back]')?.focus({ preventScroll: true });
+    if (window.isLiveData) loadPlayerProfile(detailRoute);
   });
   window.fixtureHistoryComplete = true;
   window.closeMatchdayDetail = () => { detailRoute = null; profileParent = null; modalMatch = null; };

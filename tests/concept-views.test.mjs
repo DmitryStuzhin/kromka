@@ -23,10 +23,10 @@ test('the detail concepts keep events intact and retain all existing match-secti
   assert.match(details, /data-detail-anchor="match-events"/);
   assert.match(details, /data-detail-anchor="match-statistics"/);
   assert.match(details, /data-detail-anchor="matchLineupsSection"/);
-  assert.match(css, /\.match-detail-page > \.match-events-card \{ order: 3; \}/);
+  assert.match(details, /<header class="match-detail-hero"[\s\S]*<nav class="detail-anchor-nav"[\s\S]*<div id="match-statistics">/);
   assert.doesNotMatch(css, /\.match-timeline|\.timeline-event/);
-  assert.match(html, /assets\/concept-views\.css\?v=concept-views-20261116/);
+  assert.match(html, /assets\/concept-views\.css\?v=match-header-20261117/);
   assert.match(html, /assets\/concept-views\.js\?v=concept-views-20261116/);
-  assert.match(worker, /assets\/concept-views\.css\?v=concept-views-20261116/);
+  assert.match(worker, /assets\/concept-views\.css\?v=match-header-20261117/);
   assert.match(worker, /assets\/concept-views\.js\?v=concept-views-20261116/);
 });

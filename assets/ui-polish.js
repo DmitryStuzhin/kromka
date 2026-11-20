@@ -11,7 +11,7 @@
     const values = String(row?.[5] ?? '').match(/\d+/g) || [];
     return [Number(values[0] || 0), Number(values[1] || 0)];
   };
-  const sourceLabel = () => window.isLiveData ? 'GOAL API' : 'ДЕМО-СРЕЗ';
+  const sourceLabel = () => window.isLiveData ? 'РПЛ' : 'Демо';
   const clubName = (key) => clubs?.[key]?.short || clubs?.[key]?.name || key;
 
   function leagueInsights() {

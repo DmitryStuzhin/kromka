@@ -70,7 +70,7 @@ test('PWA accepts only known GOAL fixture updates and retains REST polling', asy
   assert.ok(server.includes("fixture.provider === 'Flashscore' && fixture.goalFixtureId === id"));
   assert.ok(server.includes('fixtureId: displayFixtureId'));
   assert.ok(client.includes('Number.isInteger(update.homeScore)') && client.includes('Number.isInteger(update.awayScore)'));
-  assert.match(client, /setInterval\(\(\) => \{ if \(window\.isLiveData && document\.visibilityState === 'visible'\) refresh\(\{ quiet: true \}\).*5 \* 60 \* 1000\);/s);
+  assert.match(client, /setInterval\(\(\) => \{ if \(window\.isLiveData && document\.visibilityState === 'visible'\) refresh\(\{ quiet: true \}\).*30 \* 1000\);/s);
   const clientUrl = html.match(/<script src="(\/goal-data\.js\?v=[^"]+)" defer>/)?.[1];
   assert.ok(clientUrl, 'index loads versioned client script');
   assert.ok(worker.includes(`'${clientUrl}'`), 'service worker precaches the same script version');

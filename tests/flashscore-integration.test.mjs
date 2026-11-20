@@ -200,6 +200,40 @@ test('GOAL API remains the full fallback when the Flashscore proxy is unavailabl
   assert.equal(payload.standings.data.length, 16);
 });
 
+test('forecast recovers precise roles from remembered historical fixture IDs and formations', async t => {
+  const nextYear = new Date().getUTCFullYear() + 1;
+  const kickoff = `${nextYear}-03-01T19:00:00+03:00`;
+  const prior = { ...goalFixture('past-roles'), kickoffUtc: `${nextYear}-02-01T19:00:00+03:00`, homeTeamSystem:'5-3-2', awayTeamSystem:'4-4-2' };
+  const future = { ...goalFixture('future-roles'), kickoffUtc:kickoff, matchStatus:'SCHEDULED' };
+  const players=Array.from({length:11},(_,i)=>({id:`player-${i}/AbCd${String(i).padStart(4,'0')}`,n:`Футболист ${i}`,t:'din',p:i?'DF':'GK',no:i+1,age:24,lg:[11,900-i]}));
+  const visited=[];
+  const flashscore=await startMock((req,res)=>{
+    if(req.url==='/api/squads')return json(res,200,{players});
+    return flashscoreHandler({unavailable:true})(req,res);
+  });
+  const goal=await startMock((req,res)=>{
+    const url=new URL(req.url,'http://goal.test');
+    if(url.pathname==='/v1/fixtures')return json(res,200,{data:[prior,future]});
+    if(url.pathname==='/v1/fixtures/past-roles/lineups') {
+      visited.push(url.pathname);
+      return json(res,200,{data:{home:{startingLineups:players.map((p,i)=>({name:p.n,number:p.no,lineupPosition:String(i+1)}))},away:{}}});
+    }
+    if(url.pathname==='/v1/fixtures/future-roles/lineups')return json(res,200,{data:{home:{},away:{}}});
+    return goalHandler()(req,res);
+  });
+  t.after(()=>{flashscore.server.close();goal.server.close();});
+  const baseUrl=await startApp(t,{GOAL_API_KEY:'test-key',GOAL_API_BASE:`${goal.url}/v1`,RPL_FLASHSCORE_PROXY_URL:flashscore.url});
+  await fetch(`${baseUrl}/api/rpl?season=${nextYear-1}`);
+  const response=await fetch(`${baseUrl}/api/fixtures/future-roles/lineups`);
+  assert.equal(response.status,200);
+  const payload=await response.json();
+  assert.ok(visited.length>0);
+  assert.equal(payload.prediction.home.formation,'5-3-2');
+  assert.equal(payload.prediction.home.positionHistoryMatches,1);
+  assert.equal(payload.prediction.home.startingLineups[1].tacticalRole,'RWB');
+  assert.equal(payload.prediction.home.startingLineups[2].tacticalRole,'RCB');
+});
+
 test('supplemental GOAL pagination does not override Flashscore fixture-history completeness', async (t) => {
   const flashscore = await startMock(flashscoreHandler({ completeSeason: true }));
   const goal = await startMock(goalHandler({ fullHistory: true }));
@@ -214,4 +248,126 @@ test('supplemental GOAL pagination does not override Flashscore fixture-history 
   const payload = await response.json();
   assert.equal(payload.provider, 'Flashscore');
   assert.equal(payload.fixtureHistoryComplete, true);
+});
+
+test('player profile keeps league and all-competition totals separate and rejects players from another club', async (t) => {
+  const id = 'ivan-petrov/AbCd1234';
+  let detailRequests = 0;
+  const flashscore = await startMock((req, res) => {
+    if (req.url === '/api/squads') return json(res, 200, { players: [
+      { id, n: 'Иван Петров', t: 'din', p: 'FW', no: 10, lg: [4, 110, 1, null, 0, 0], tot: [6, 230, 2, 1, 1, 0] }
+    ] });
+    if (req.url === `/api/player/${id}`) {
+      detailRequests++;
+      return json(res, 200, { id, n: 'Иван Петров', img: 'real-photo.png', career: [{ category: 'league', season: '2025/2026', played: 20 }] });
+    }
+    return json(res, 404, { error: 'not found' });
+  });
+  t.after(() => flashscore.server.close());
+  const base = await startApp(t, { RPL_FLASHSCORE_PROXY_URL: flashscore.url });
+  const request = (team, query) => fetch(`${base}/api/teams/${team}/player?${new URLSearchParams(query)}`);
+  const response = await request(DYNAMO_ID, { id });
+  assert.equal(response.status, 200);
+  const profile = await response.json();
+  assert.deepEqual(profile.league, { played: 4, minutes: 110, goals: 1, assists: null, yellow: 0, red: 0 });
+  assert.deepEqual(profile.all, { played: 6, minutes: 230, goals: 2, assists: 1, yellow: 1, red: 0 });
+  assert.equal(profile.photo, `/api/player-portraits/${id}`);
+  assert.equal(profile.career[0].played, 20);
+  assert.equal((await request(ZENIT_ID, { id })).status, 404);
+  assert.equal((await request(DYNAMO_ID, { id: 'goal-id', name: 'Петров Иван', number: '10' })).status, 200);
+  assert.equal(detailRequests, 1);
+});
+
+for (const standingsUnavailable of [false, true]) {
+  test(`today's missing live fixture supplements the primary calendar${standingsUnavailable ? ' even if standings fail' : ''}`, async t => {
+    const today = new Intl.DateTimeFormat('en-CA', { timeZone: 'Europe/Moscow', year: 'numeric', month: '2-digit', day: '2-digit' }).format(new Date());
+    const live = {
+      id: 'rostov-live', homeTeamId: 'cmr7uolsy8mgirx06lps95sxi', awayTeamId: 'cmr7uolt48mgkrx06mtepmfuh',
+      homeTeam: { id: 'cmr7uolsy8mgirx06lps95sxi', name: 'Rostov' }, awayTeam: { id: 'cmr7uolt48mgkrx06mtepmfuh', name: 'Krylya Sovetov' },
+      kickoffUtc: `${today}T16:30:00Z`, matchStatus: 'LIVE', matchLive: '1', matchMinute: '86', homeTeamScore: '2', awayTeamScore: '0', matchRound: '15'
+    };
+    const fallback = goalHandler();
+    const goal = await startMock((req, res) => {
+      const url = new URL(req.url, 'http://goal.test');
+      if (url.pathname === '/v1/fixtures' && url.searchParams.get('from') === url.searchParams.get('to')) return json(res, 200, { data: [live] });
+      if (url.pathname.endsWith('/standings') && standingsUnavailable) return json(res, 503, { error: 'unavailable' });
+      if (url.pathname === '/v1/fixtures/rostov-live/events') return json(res, 200, { data: [{ minute: '14', type: 'goal', player: { name: 'Olusegun' } }] });
+      return fallback(req, res);
+    });
+    const flashscore = await startMock(flashscoreHandler());
+    t.after(() => { goal.server.close(); flashscore.server.close(); });
+    const base = await startApp(t, { GOAL_API_KEY: 'test-key', GOAL_API_BASE: `${goal.url}/v1`, RPL_FLASHSCORE_PROXY_URL: flashscore.url });
+    const response = await fetch(`${base}/api/rpl?season=2026`);
+    assert.equal(response.status, 200);
+    const payload = await response.json();
+    assert.equal(payload.fixtures.data.length, 3, 'shared historical match must not be duplicated');
+    assert.equal(payload.fixtures.data.filter(row => row.goalFixtureId === 'goalfixture1').length, 1);
+    const match = payload.fixtures.data.find(row => row.id === 'rostov-live');
+    assert.equal(match.matchStatus, 'LIVE');
+    assert.equal(match.matchMinute, '86');
+    assert.equal(match.homeTeamScore, '2');
+    assert.equal(match.awayTeamScore, '0');
+    assert.equal(match.provider, 'GOAL API');
+    assert.equal(payload.standingsProvider, standingsUnavailable ? 'Flashscore' : 'GOAL API');
+    const events = await fetch(`${base}/api/fixtures/rostov-live/events`);
+    assert.equal(events.status, 200, 'supplemental match details must be accessible');
+    assert.equal((await events.json()).data[0].player.name, 'Olusegun');
+  });
+}
+
+test('fresh daily scores override stale season rows without changing the primary fixture ID', async t => {
+  const today = new Intl.DateTimeFormat('en-CA', { timeZone: 'Europe/Moscow', year: 'numeric', month: '2-digit', day: '2-digit' }).format(new Date());
+  const historical = { ...goalFixture('goal-live'), kickoffUtc: `${today}T19:00:00+03:00`, matchStatus: 'LIVE', homeScore: 1, awayScore: 0, matchMinute: '10' };
+  const fallback = goalHandler();
+  const goal = await startMock((req, res) => {
+    const url = new URL(req.url, 'http://goal.test');
+    if (url.pathname === '/v1/fixtures') {
+      const current = url.searchParams.get('from') === url.searchParams.get('to');
+      return json(res, 200, { data: [{ ...historical, ...(current ? { homeScore: 2, matchMinute: '90+' } : {}) }] });
+    }
+    return fallback(req, res);
+  });
+  const flashscore = await startMock((req, res) => req.url === '/api/season' ? json(res, 200, { matches: [
+    { id: 'FS123456', h: 'din', a: 'zen', d: today, t: '19:00', r: 15, st: 1, live: false, hg: null, ag: null }
+  ] }) : flashscoreHandler()(req, res));
+  t.after(() => { goal.server.close(); flashscore.server.close(); });
+  const base = await startApp(t, { GOAL_API_KEY: 'test-key', GOAL_API_BASE: `${goal.url}/v1`, RPL_FLASHSCORE_PROXY_URL: flashscore.url });
+  const { fixtures } = await (await fetch(`${base}/api/rpl?season=2026`)).json();
+  assert.equal(fixtures.data.length, 1);
+  assert.equal(fixtures.data[0].id, 'FS123456');
+  assert.equal(fixtures.data[0].goalFixtureId, 'goal-live');
+  assert.equal(fixtures.data[0].matchStatus, 'LIVE');
+  assert.equal(fixtures.data[0].matchMinute, '90+');
+  assert.equal(fixtures.data[0].homeScore, 2);
+  assert.equal(fixtures.data[0].awayScore, 0);
+});
+
+test('chronology supplements a goals-only endpoint with cards and substitutions from the full fixture', async t => {
+  const score = { id:'g1',time:'55',type:'GOAL',homeScorer:'I. Petrov',homeScorerId:'111',score:'1 - 0' };
+  const fallback = goalHandler();
+  const goal = await startMock((req,res) => {
+    const url = new URL(req.url,'http://goal.test');
+    if(url.pathname === '/v1/fixtures/goalfixture1/events') return json(res,200,{data:[score],grouped:{goals:[score],cards:[]}});
+    if(url.pathname === '/v1/fixtures/goalfixture1') return json(res,200,{data:{...goalFixture(),events:[score],
+      cards:[{time:'62',card:'yellow card',homeFault:'I. Petrov',homePlayerId:'111'}],
+      substitutions:[{time:'67',team:'home',substitution:'S. Ivanov | I. Petrov',substitutionPlayerId:'222 | 111'}],
+      lineups:[{team:'home',playerKey:'111',lineupPlayer:'Ivan Petrov',lineupNumber:'10'}]
+    }});
+    return fallback(req,res);
+  });
+  const flashscore = await startMock(flashscoreHandler({emptyMatchData:true}));
+  t.after(()=>{goal.server.close();flashscore.server.close();});
+  const base=await startApp(t,{GOAL_API_KEY:'test-key',GOAL_API_BASE:`${goal.url}/v1`,RPL_FLASHSCORE_PROXY_URL:flashscore.url});
+  await fetch(`${base}/api/rpl?season=2026`);
+  const response=await fetch(`${base}/api/fixtures/FS123456/events`);
+  assert.equal(response.status,200);
+  const payload=await response.json();
+  assert.equal(payload.data.length,3,'goal from both endpoints is included once');
+  assert.equal(payload.data[0].player.name,'Иван Петров');
+  const card=payload.data.find(row=>row.card);
+  assert.equal(card.player.name,'Иван Петров');
+  assert.equal(card.team.id,DYNAMO_ID);
+  const substitution=payload.data.find(row=>row.substitution);
+  assert.equal(substitution.playerIn.name,'Иван Петров');
+  assert.equal(substitution.team.id,DYNAMO_ID);
 });

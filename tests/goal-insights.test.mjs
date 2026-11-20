@@ -42,3 +42,37 @@ test('event and statistic payloads that are absent or malformed normalize to emp
   assert.deepEqual(insights.toEvents({ events: 'not-an-array' }), []);
   assert.deepEqual(insights.toStats({ statistics: [] }), []);
 });
+
+test('full fixture chronology includes named goals, assists, cards and substitutions without duplicate goals', () => {
+  const goal = { id:'goal-1', time:'60', type:'GOAL', homeScorer:'Тимур Сулейманов', homeAssist:'Олакунле Олусегун', score:'2 - 0' };
+  const rows = insights.normalizeEventsPayload({ data: {
+    homeTeam:{name:'Ростов'}, awayTeam:{name:'Крылья Советов'}, events:[goal],
+    cards:[{time:'62',card:'yellow card',homeFault:'Дмитрий Чистяков'},{time:'90+2',card:'red card',awayFault:'Игрок гостей'}],
+    substitutions:[{time:'78',team:'home',substitution:'Тимур Сулейманов | Артём Шамонин'}],
+    grouped:{goals:[goal]}
+  }});
+  assert.equal(rows.length,4);
+  assert.deepEqual(rows[0],['60′','Гол · Тимур Сулейманов · пас: Олакунле Олусегун · 2:0','Ростов']);
+  assert.deepEqual(rows[1],['62′','Жёлтая карточка · Дмитрий Чистяков','Ростов']);
+  assert.deepEqual(rows[2],['90+2′','Красная карточка · Игрок гостей','Крылья Советов']);
+  assert.deepEqual(rows[3],['78′','Замена · ↑ Артём Шамонин · ↓ Тимур Сулейманов','Ростов']);
+});
+
+test('match statistics from the real provider schema are translated without changing values', () => {
+  const labels=['Shots Total','Shots On Goal','Shots Off Goal','Shots Blocked','Shots Inside Box','Shots Outside Box','Fouls','Corners','Offsides','Ball Possession','Yellow Cards','Red Cards','Saves','Passes Total','Passes Accurate'];
+  const rows=insights.normalizeStatsPayload({data:{match:{fullTime:labels.map(type=>({type,home:'4',away:'0'})),firstHalf:[]}}});
+  assert.equal(rows.length,labels.length);
+  for(const [label,home,away] of rows){assert.match(label,/[а-яё]/iu);assert.equal(home,'4');assert.equal(away,'0');}
+  assert.equal(rows[0][0],'Всего ударов');
+  assert.equal(rows[5][0],'Удары из-за штрафной');
+  assert.equal(insights.localizeStatLabel('Summary · Expected Goals (xG)'),'Главное · Ожидаемые голы (xG)');
+});
+
+test('live clocks retain added time and fall back to elapsed minutes without inventing a minute', () => {
+  assert.equal(insights.matchClock({matchMinute:'90+'}),'90+');
+  assert.equal(insights.matchClock({matchMinute:'90+4',matchElapsed:90,matchExtra:4}),'90+4');
+  assert.equal(insights.matchClock({matchMinute:'LIVE',matchElapsed:67}),'67');
+  assert.equal(insights.matchClock({matchElapsed:90,matchExtra:4}),'90+4');
+  assert.equal(insights.matchClock({matchPeriod:'HALF_TIME',matchMinute:'45'}),'Перерыв');
+  assert.equal(insights.matchClock({matchMinute:null,matchElapsed:null}),'');
+});

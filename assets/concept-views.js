@@ -86,7 +86,7 @@
     const sourceNote = screen.querySelector('.source-note');
     if (sourceNote) {
       sourceNote.textContent = window.isLiveData
-        ? `Таблица: ${window.rplStandingsProvider || window.rplDataProvider} · сезон 2026/27. Форма построена только по завершённым матчам из загруженной истории${window.fixtureHistoryComplete === false ? '; история поставщика неполная' : ''}.`
+        ? `РПЛ · сезон 2026/27. Форма построена только по завершённым матчам из загруженной истории${window.fixtureHistoryComplete === false ? '; история поставщика неполная' : ''}.`
         : 'Демонстрационный срез таблицы · не live-данные. Форма построена только по завершённым матчам, доступным в этом срезе.';
     }
   }
@@ -104,7 +104,7 @@
       const tableTitle = screen.querySelector('.table-title');
       if (tableTitle) tableTitle.textContent = 'Турнирная таблица';
       const snapshot = screen.querySelector('.table-snapshot');
-      if (snapshot) snapshot.textContent = window.isLiveData ? `${window.rplStandingsProvider || window.rplDataProvider} · 2026/27` : 'Демо-срез · не live';
+      if (snapshot) snapshot.textContent = window.isLiveData ? 'РПЛ · 2026/27' : 'Демо-срез · не live';
       decorateTable();
     }
   }

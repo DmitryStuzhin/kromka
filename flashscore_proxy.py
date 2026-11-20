@@ -16,7 +16,7 @@
   GET /api/season[?full=1]          — календарь и результаты сезона (live-счёт тоже)
   GET /api/squads                   — составы 16 клубов + статистика игроков (РПЛ и все турниры)
   GET /api/match/<id>               — события, статистика, составы и рейтинги матча
-  GET /api/player/<slug>/<id>       — фото, полное имя, возраст, стоимость, контракт игрока
+  GET /api/player/<slug>/<id>       — фото, биография и статистика карьеры игрока
 
 Это неофициальный доступ к публичным страницам Flashscore: при изменениях на их
 стороне разбор может сломаться. Не делай слишком частых запросов — в прокси есть кэш.
@@ -308,12 +308,39 @@ def squads():
 
 
 # ------------------------------------------------------------------ player
+def player_career(markup):
+    def plain(value):
+        return html.unescape(re.sub(r"<[^>]+>", "", value)).strip()
+
+    out = []
+    tabs = re.split(r'<div id="(league|nacional-cup|international-cups|national-team)" class="careerTab[^"]*">', markup)
+    for category, content in zip(tabs[1::2], tabs[2::2]):
+        for row in re.split(r'<div class="careerTab__row">', content)[1:]:
+            row = re.split(r'<div class="careerTab__row|<h3\b', row, maxsplit=1)[0]
+            season = re.search(r'<span class="[^"]*\bcareerTab__season"[^>]*>([^<]+)</span>', row)
+            links = re.findall(r'<a href="(/(?:team|football)/[^"]+)" title="([^"]+)"', row)
+            values = re.split(r'<div class="careerTab__stat(?: [^"]*)?">', row)[1:7]
+            if not season or len(links) < 2 or len(values) != 6:
+                continue
+            cols = [plain(value.split("</div>", 1)[0]) for value in values]
+            rating = cols[0].replace(",", ".")
+            out.append({
+                "category": category, "season": plain(season.group(1)),
+                "team": html.unescape(links[0][1]), "teamCode": SLUG2ID.get(links[0][0].strip("/").split("/")[-1]),
+                "competition": html.unescape(links[1][1]),
+                "rpl": links[1][0].startswith("/football/russia/premier-league"),
+                "rating": float(rating) if re.fullmatch(r"[0-9]+(?:\.[0-9]+)?", rating) else None,
+                **dict(zip(("played", "goals", "assists", "yellow", "red"), map(_int, cols[1:]))),
+            })
+    return out
+
+
 def player(pid):
-    h = page(f"/player/{pid}/", ttl=6 * 3600)
+    h = page(f"/player/{pid}/", ttl=30 * 60)
     i = h.find("playerHeader__wrapper")
     j = h.find('id="player-profile"', i)
     seg = h[i:j if j > 0 else i + 8000]
-    img = re.search(r'<img[^>]+src="([^"]+)"', seg)
+    img = re.search(r'<img[^>]+src="https://static\.flashscore\.com/res/image/data/([A-Za-z0-9_-]+\.(?:png|jpe?g|webp))"', seg.split("playerHeader__infoWrapper", 1)[0])
     name = re.search(r"<h2[^>]*>([^<]+)</h2>", seg)
     info = {}
     for it in re.findall(r'class="playerInfoItem">(.*?)</div>', seg, re.S):
@@ -322,7 +349,7 @@ def player(pid):
             info[spans[0].rstrip(":")] = " ".join(spans[1:]).strip()
     out = {"id": pid, "n": html.unescape(name.group(1)).strip() if name else None}
     if img and "empty-face" not in img.group(1):
-        out["img"] = img.group(1).replace("https://static.flashscore.com/res/image/data/", "")
+        out["img"] = img.group(1)
     age = info.get("Возр") or info.get("Возраст") or ""
     m = re.match(r"(\d+)\s*\((\d\d\.\d\d\.\d{4})\)", age)
     if m:
@@ -331,6 +358,7 @@ def player(pid):
         out["val"] = info["Рыночная цена"]
     if info.get("Конец контракта"):
         out["ct"] = info["Конец контракта"]
+    out["career"] = player_career(h)
     return out
 
 

@@ -1,6 +1,4 @@
 (() => {
-  const API_SIGNUP = 'https://goal-api.com/signup';
-  const API_COVERAGE = 'https://goal-api.com/coverage/russia-premier-league-api';
   const safe = (v) => String(v ?? '').replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
   const plain = (v) => String(v ?? '').replace(/<[^>]*>/g, '').trim();
   const num = (v, fallback = 0) => { const n = Number(String(v ?? '').replace(/[^\d.+-]/g, '')); return Number.isFinite(n) ? n : fallback; };
@@ -16,7 +14,7 @@
     krasnodar: ['krasnodar', 'краснодар'], baltika: ['baltika', 'балтика'],
     orenburg: ['orenburg', 'газовик оренбург', 'оренбург'], rubin: ['rubin kazan', 'рубин казань', 'рубин'],
     krylia: ['krylia sovetov', 'krylya sovetov', 'крылья советов', 'крылья'], rostov: ['rostov', 'ростов'],
-    akhmat: ['akhmat grozny', 'akhmat', 'ахмат грозный', 'ахмат'], akron: ['akron tolyatti', 'akron togliatti', 'акрон тольятти', 'акрон'],
+    akhmat: ['akhmat grozny', 'akhmat', 'ахмат грозный', 'ахмат'], akron: ['akron', 'akron tolyatti', 'akron togliatti', 'акрон тольятти', 'акрон'],
     fakel: ['fakel voronezh', 'fakel', 'факел воронеж', 'факел'], sochi: ['sochi', 'сочи'],
     pari: ['pari nn', 'parinn', 'пари нн', 'нижний новгород'], rodina: ['rodina', 'родина']
   };
@@ -69,6 +67,8 @@
     // Keep the two Dynamo clubs distinct even if a provider shortens their names.
     if (String(id) === 'cmr7uolsy8mghrx06jog9s5dt') return 'dynamo';
     if (String(id) === 'cmr7uolt08mgjrx06xj1x745j') return 'makhachkala';
+    if (String(id) === 'cmr7uolsj8mg9rx06lps3j1ye') return 'akron';
+    if (idToKey.has(String(id))) return idToKey.get(String(id));
     const n = norm(name);
     if (keyAliases.has(n)) return keyAliases.get(n);
     for (const [alias, key] of keyAliases) if (alias.length > 4 && n.includes(alias)) return key;
@@ -129,8 +129,8 @@
     const iso = getDateKey(dateRaw);
     const status = statusOf(item);
     const hs = scoreSide(item, 'home'); const as = scoreSide(item, 'away');
-    const clock = item.matchMinute ?? item.minute ?? item.elapsed ?? item.elapsedTime ?? item.clock?.displayValue ?? item.status?.elapsed;
-    const minute = clock === undefined || clock === null || clock === '' ? 'LIVE' : `${String(clock).replace(/[^\d+]/g, '')}′`;
+    const clock = window.rplMatchInsights?.matchClock(item) || '';
+    const minute = clock === 'Перерыв' ? clock : clock ? `${clock}′` : 'LIVE';
     const kick = dateRaw && String(dateRaw).includes('T') ? new Intl.DateTimeFormat('ru-RU', { hour: '2-digit', minute: '2-digit', timeZone: 'Europe/Moscow' }).format(new Date(dateRaw)) : String(item.matchTime || item.time || item.kickoffTime || item.kickoff_time || '').slice(0, 5);
     const r = roundOf(item.matchRound ?? item.round ?? item.matchday ?? item.week);
     const key = String(item.id || item.fixtureId || item.fixture_id || item.matchId || `goal-${index}`).replace(/[^a-zA-Z0-9_-]/g, '').slice(0, 64);
@@ -149,19 +149,11 @@
     return [key, played, won, drawn, lost, `${gf}–${ga}`, points];
   }
   let liveEventSource = null;
-  function dataProviderName() { return window.rplDataProvider || 'GOAL API'; }
-  function standingsProviderName() { return window.rplStandingsProvider || dataProviderName(); }
-  function goalRoleDescription() {
-    if (dataProviderName() !== 'Flashscore') return 'GOAL API — текущий источник данных.';
-    return window.rplGoalApiConfigured ? 'GOAL API дополняет пропуски и остаётся резервом.' : 'Резерв GOAL API не настроен.';
-  }
   function setDataRibbon(error = false) {
     const strip = document.querySelector('.prototype-strip');
     if (!strip) return;
-    const provider = dataProviderName();
-    const liveLabel = provider === 'Flashscore' ? `${provider} · GOAL LIVE` : `${provider} · LIVE`;
-    const text = window.isLiveData ? window.goalLiveStreamState === 'connected' ? liveLabel : `${provider} · REST` : error ? `${provider} недоступен · показано демо` : 'Прототип · демо · не live';
-    strip.innerHTML = `<span><i class="dot"></i>${text}</span><span>Только РПЛ</span>`;
+    const text = window.isLiveData ? 'Кромка · РПЛ' : error ? 'Кромка · Демо' : 'Кромка · Загружаем матчи';
+    strip.innerHTML = `<span><i class="dot"></i>${text}</span>`;
   }
   function applyGoalLiveUpdate(update) {
     if (!update || update.provider !== 'GOAL API') return;
@@ -174,11 +166,11 @@
     }
     if (update.status === 'live') {
       if (match.status !== 'live') { match.status = 'live'; changed = true; }
-      if (!/^\d{1,3}(?:\+\d{1,2})?′$/.test(match.time)) { match.time = 'LIVE'; changed = true; }
+      if (match.time !== 'Перерыв' && !/^\d{1,3}(?:\+\d{0,2})?′$/.test(match.time)) { match.time = 'LIVE'; changed = true; }
     }
     if (update.status === 'finished' && match.status !== 'finished') { match.status = 'finished'; match.time = 'ЗАВЕРШЁН'; changed = true; }
-    if (update.status !== 'finished' && typeof update.minute === 'string' && /^\d{1,3}(?:\+\d{1,2})?$/.test(update.minute)) {
-      const nextTime = `${update.minute}′`;
+    if (update.status !== 'finished' && typeof update.minute === 'string' && (update.minute === 'Перерыв' || /^\d{1,3}(?:\+\d{0,2})?$/.test(update.minute))) {
+      const nextTime = update.minute === 'Перерыв' ? update.minute : `${update.minute}′`;
       if (match.time !== nextTime) { match.time = nextTime; changed = true; }
     }
     if (!changed) return;
@@ -213,7 +205,7 @@
     });
   }
   function liveTablePage() {
-    return `<div class="page-head"><div><div class="page-kicker">СЕЗОН 2026/27 · ${safe(standingsProviderName())}</div><h1 class="page-title">Таблица</h1></div><div class="page-date">ОБЩАЯ<br>ТУРНИРНАЯ</div></div><div class="table-bar"><div class="table-title">РПЛ</div><div class="table-snapshot">ОБЩАЯ<br>ТУРНИРНАЯ</div></div><div class="table-wrap"><table class="standings"><thead><tr><th style="width:31px">№</th><th style="text-align:left">КЛУБ</th><th style="width:31px">И</th><th style="width:40px">Р/М</th><th style="width:42px">О</th></tr></thead><tbody>${standings.map((row, i) => `<tr class="${i < 4 ? 'top-zone' : i > standings.length - 3 ? 'bottom-zone' : ''} ${selectedClub === row[0] ? 'selected-row' : ''}" data-club-row="${safe(row[0])}"><td class="pos">${i + 1}</td><td class="club-cell"><div class="club-inline">${clubBadge(row[0])}<span class="club-name">${safe(clubs[row[0]]?.short || row[0])}</span></div></td><td>${safe(row[1])}</td><td>${safe(row[5])}</td><td class="points">${safe(row[6])}</td></tr>`).join('')}</tbody></table><div class="table-legend"><span class="legend-item"><i class="legend-marker"></i>Верхняя группа</span><span class="legend-item"><i class="legend-marker relegation"></i>Нижняя часть</span></div></div><p class="source-note">Положение и очки загружены через ${safe(standingsProviderName())}. ${standingsProviderName() === 'GOAL API' ? `Таблица кэшируется сервером. <a href="${API_COVERAGE}" target="_blank" rel="noreferrer">Покрытие РПЛ</a>.` : 'Таблица рассчитана из завершённых матчей сезона.'}</p><div class="section-heading"><h2>Лидер таблицы</h2><span class="micro">ПО ОЧКАМ</span></div><div class="data-tile"><b>${standings[0] ? safe(clubs[standings[0][0]]?.short || '—') : '—'}</b><span>${standings[0] ? `${safe(standings[0][6])} очков` : 'Данные пока не получены'}</span></div>${typeof comparisonCard === 'function' ? comparisonCard() : ''}`;
+    return `<div class="page-head"><div><div class="page-kicker">СЕЗОН 2026/27</div><h1 class="page-title">Таблица</h1></div><div class="page-date">ОБЩАЯ<br>ТУРНИРНАЯ</div></div><div class="table-bar"><div class="table-title">РПЛ</div><div class="table-snapshot">ОБЩАЯ<br>ТУРНИРНАЯ</div></div><div class="table-wrap"><table class="standings"><thead><tr><th style="width:31px">№</th><th style="text-align:left">КЛУБ</th><th style="width:31px">И</th><th style="width:40px">Р/М</th><th style="width:42px">О</th></tr></thead><tbody>${standings.map((row, i) => `<tr class="${i < 4 ? 'top-zone' : i > standings.length - 3 ? 'bottom-zone' : ''} ${selectedClub === row[0] ? 'selected-row' : ''}" data-club-row="${safe(row[0])}"><td class="pos">${i + 1}</td><td class="club-cell"><div class="club-inline">${clubBadge(row[0])}<span class="club-name">${safe(clubs[row[0]]?.short || row[0])}</span></div></td><td>${safe(row[1])}</td><td>${safe(row[5])}</td><td class="points">${safe(row[6])}</td></tr>`).join('')}</tbody></table><div class="table-legend"><span class="legend-item"><i class="legend-marker"></i>Верхняя группа</span><span class="legend-item"><i class="legend-marker relegation"></i>Нижняя часть</span></div></div><div class="section-heading"><h2>Лидер таблицы</h2><span class="micro">ПО ОЧКАМ</span></div><div class="data-tile"><b>${standings[0] ? safe(clubs[standings[0][0]]?.short || '—') : '—'}</b><span>${standings[0] ? `${safe(standings[0][6])} очков` : 'Данные пока не получены'}</span></div>${typeof comparisonCard === 'function' ? comparisonCard() : ''}`;
   }
   const squadCache = new Map();
   const squadMetaCache = new Map();
@@ -224,14 +216,23 @@
   const matchInsightsPending = new Map();
   const positionNames = { Goalkeepers: 'Вратари', Defenders: 'Защитники', Midfielders: 'Полузащитники', Forwards: 'Нападающие' };
   function playerName(player) { return plain(player?.name || player?.lineupPlayer || player?.displayName || 'Игрок'); }
+  function playerPhotoUrl(value) {
+    const input = String(value || '');
+    return /^\/api\/player-portraits\/[a-z0-9-]{1,100}\/[a-z0-9]{8}$/i.test(input) ? input : mediaUrl(input);
+  }
+  window.rplPlayerPhotoUrl = playerPhotoUrl;
+  function playerPhoto(player) {
+    return playerPhotoUrl(player?.image || player?.playerImage || player?.photo || player?.avatar) || playerPhotoUrl(player?.portraitPath);
+  }
   function playerAvatar(player, size = '') {
-    const name = playerName(player); const image = mediaUrl(player?.image || player?.playerImage || player?.photo || player?.avatar);
+    const name = playerName(player);
+    const image = playerPhoto(player);
     const initials = name.split(/\s+/).slice(0, 2).map((part) => Array.from(part)[0] || '').join('').toUpperCase() || '•';
-    return `<span class="player-avatar ${size} ${image ? 'has-photo' : 'no-photo'}">${image ? `<img src="${safe(image)}" alt="${safe(name)}" loading="lazy" referrerpolicy="no-referrer" onerror="this.hidden=true;this.parentElement.classList.add('no-photo')">` : ''}<span class="avatar-fallback">${safe(initials)}</span></span>`;
+    return `<span class="player-avatar ${size} no-photo">${image ? `<img src="${safe(image)}" alt="" loading="lazy" decoding="async" referrerpolicy="no-referrer" onload="this.parentElement.classList.remove('no-photo')" onerror="this.hidden=true">` : ''}<span class="avatar-fallback" aria-hidden="true">${safe(initials)}</span></span>`;
   }
   function playerProfileAttrs(player, clubKey) {
-    const photo = mediaUrl(player?.image || player?.playerImage || player?.photo || player?.avatar);
-    return `data-player-profile data-player-name="${safe(playerName(player))}" data-player-number="${safe(player?.lineupNumber || player?.number || '')}" data-player-position="${safe(player?.playerPosition || player?.position || player?.type || '')}" data-player-age="${safe(player?.age || '')}" data-player-photo="${safe(photo)}" data-player-team="${safe(clubKey || '')}"`;
+    const role = window.rplLineupLayout?.roles[player?.tacticalRole]?.[1];
+    return `data-player-profile data-player-name="${safe(playerName(player))}" data-player-id="${safe(player?.profileId || player?.id || player?.playerId || '')}" data-player-number="${safe(player?.lineupNumber || player?.number || '')}" data-player-position="${safe(role || player?.playerPosition || player?.position || player?.type || '')}" data-player-age="${safe(player?.age || '')}" data-player-photo="${safe(playerPhoto(player))}" data-player-team="${safe(clubKey || '')}"`;
   }
   function playerGroup(player) {
     const type = norm(player?.playerPosition || player?.type || player?.position || '');
@@ -242,20 +243,11 @@
     return 'other';
   }
   function rosterMarkup(rows, meta = {}, clubKey = '') {
-    if (!Array.isArray(rows) || !rows.length) return '<div class="empty-note">Состав пока не опубликован поставщиком.</div>';
+    if (!Array.isArray(rows) || !rows.length) return '<div class="empty-note">Состав пока не опубликован.</div>';
     const order = ['Goalkeepers', 'Defenders', 'Midfielders', 'Forwards', 'unknown'];
     const groups = new Map();
     for (const player of rows) { const type = player.type || 'unknown'; if (!groups.has(type)) groups.set(type, []); groups.get(type).push(player); }
-    const photos = rows.filter((player) => mediaUrl(player.image || player.photo || player.playerImage)).length;
-    const fallbackPhotos = rows.filter((player) => player.portraitSource === 'API-Football' && mediaUrl(player.image || player.photo || player.playerImage)).length;
-    const rosterProvider = meta.provider || 'GOAL API';
-    const source = `${rosterProvider}${meta.supplementalProvider ? ` + ${meta.supplementalProvider}` : ''}${fallbackPhotos ? ` + API-FOOTBALL · ${fallbackPhotos} РЕЗЕРВ` : ''}`;
-    const fallbackNote = meta.unavailable
-      ? '<div class="portrait-source-note">Резерв API-Football временно недоступен; для не найденных фото оставлены инициалы.</div>'
-      : meta.attempted && photos < rows.length
-        ? `<div class="portrait-source-note">API-Football добавил ${fallbackPhotos} фото${meta.rejectedPhotos ? ` · ${meta.rejectedPhotos} кандидатов не прошли проверку, включая ${meta.rejectedSilhouettes || 0} общих силуэтов` : ''}. Для остальных нет надёжного совпадения, поэтому оставлены инициалы.</div>`
-        : '';
-    return `<div class="roster-summary">${rows.length} ЗАПИСЕЙ · ${photos}/${rows.length} ФОТО · ${source}</div>${fallbackNote}${[...groups.entries()].sort((a, b) => order.indexOf(a[0]) - order.indexOf(b[0])).map(([type, players]) => `<section class="roster-group"><h3>${safe(positionNames[type] || (type === 'unknown' ? 'Без категории GOAL' : type))} <span>${players.length}</span></h3><div class="squad-grid">${players.map((player) => `<button type="button" class="squad-player" ${playerProfileAttrs(player, clubKey)}>${playerAvatar(player)}<span class="squad-player-copy"><strong>${safe(playerName(player))}</strong><span>${player.number ? `№ ${safe(player.number)}` : ''}${player.age ? ` · ${safe(player.age)} лет` : ''}</span></span><span class="player-open-mark" aria-hidden="true">↗</span></button>`).join('')}</div></section>`).join('')}`;
+    return `<div class="roster-summary">Игроков в составе: ${rows.length}</div>${[...groups.entries()].sort((a, b) => order.indexOf(a[0]) - order.indexOf(b[0])).map(([type, players]) => `<section class="roster-group"><h3>${safe(positionNames[type] || (type === 'unknown' ? 'Позиция не указана' : type))} <span>${players.length}</span></h3><div class="squad-grid">${players.map((player) => `<button type="button" class="squad-player" ${playerProfileAttrs(player, clubKey)}>${playerAvatar(player)}<span class="squad-player-copy"><strong>${safe(playerName(player))}</strong><span>${player.number ? `№ ${safe(player.number)}` : ''}${player.age ? ` · ${safe(player.age)} лет` : ''}</span></span><span class="player-open-mark" aria-hidden="true">↗</span></button>`).join('')}</div></section>`).join('')}`;
   }
   function loadingMarkup(label, count = 3) {
     return `<div class="loading-state" role="status" aria-live="polite"><div class="loading-state-label">${safe(label)}</div><div class="loading-skeleton-stack">${Array.from({ length: count }, () => '<div class="skeleton-row" aria-hidden="true"></div>').join('')}</div></div>`;
@@ -265,10 +257,10 @@
     if (squadCache.has(clubKey)) { root.setAttribute('aria-busy', 'false'); root.innerHTML = rosterMarkup(squadCache.get(clubKey), squadMetaCache.get(clubKey), clubKey); return; }
     if (squadPending.has(clubKey)) return;
     const teamId = clubs[clubKey].apiId;
-    if (!teamId) { root.innerHTML = '<div class="empty-note">ID команды пока не пришёл от поставщика.</div>'; return; }
+    if (!teamId) { root.innerHTML = '<div class="empty-note">Состав клуба пока недоступен.</div>'; return; }
     squadPending.add(clubKey);
     root.setAttribute('aria-busy', 'true');
-    root.innerHTML = loadingMarkup(`Загружаю актуальный состав из ${dataProviderName()}…`, 3);
+    root.innerHTML = loadingMarkup('Загружаем состав…', 3);
     try {
       const response = await fetch(`/api/teams/${encodeURIComponent(teamId)}/players`, { cache: 'no-store' });
       if (!response.ok) throw new Error(`Roster HTTP ${response.status}`);
@@ -290,17 +282,25 @@
     return named ? named.replace(/\s+/g, '') : 'СХЕМА НЕ УКАЗАНА';
   }
   function formationRow(players, clubKey) {
-    return `<div class="formation-row">${players.map((player) => `<button type="button" class="formation-player" ${playerProfileAttrs(player, clubKey)}>${playerAvatar(player, 'pitch-avatar')}<span class="formation-number">${safe(player.lineupNumber || player.number || '')}</span><small>${safe(playerName(player))}</small></button>`).join('')}</div>`;
+    const layout=window.rplLineupLayout;
+    return `<div class="formation-row">${players.map(player => {
+      const role=layout?.roles[player.tacticalRole];
+      return `<button type="button" class="formation-player" ${playerProfileAttrs(player, clubKey)}${role ? ` title="${safe(role[1])}"` : ''}>${playerAvatar(player, 'pitch-avatar')}<span class="formation-number">${safe(player.lineupNumber || player.number || '')}</span><small>${safe(playerName(player))}</small>${role ? `<span class="formation-role">${safe(role[0])}</span>` : ''}</button>`;
+    }).join('')}</div>`;
   }
-  function teamLineupMarkup(teamData, clubKey, fallbackFormation) {
+  function teamLineupMarkup(teamData, clubKey, fallbackFormation, predicted = false) {
     const { starters, bench } = lineupLists(teamData);
     if (!starters.length) return '<div class="empty-note">Стартовый состав этой команды ещё не опубликован.</div>';
-    const groups = { forwards: [], midfielders: [], defenders: [], keepers: [], other: [] };
-    starters.forEach((player) => groups[playerGroup(player)].push(player));
-    const grouped = ['forwards', 'midfielders', 'defenders', 'keepers'].filter((key) => groups[key].length).map((key) => groups[key]);
-    const rows = [...grouped, ...(groups.other.length ? [groups.other] : [])];
     const formation = formationOf(teamData, starters, fallbackFormation);
-    return `<section class="lineup-team"><div class="lineup-teamhead">${clubBadge(clubKey, 'lineup-crest')}<strong>${safe(clubs[clubKey]?.short || clubKey)}</strong><span class="formation-badge">${safe(formation)}</span></div><p class="lineup-layout-note">На поле — группы по позициям поставщика, не подтверждённые координаты.</p><div class="lineup-pitch">${rows.map((row) => formationRow(row, clubKey)).join('')}</div>${bench.length ? `<div class="bench-title">ЗАПАСНЫЕ · ${bench.length}</div><div class="bench-list">${bench.map((player) => `<button type="button" class="bench-player" ${playerProfileAttrs(player, clubKey)}>${playerAvatar(player, 'bench-avatar')}<span>${safe(player.lineupNumber || player.number || '')} ${safe(playerName(player))}</span></button>`).join('')}</div>` : ''}</section>`;
+    const layout=window.rplLineupLayout;
+    const placed=!teamData.positionsUnavailable && layout?.placement(starters,formation);
+    const grid = placed ? [...new Set(placed.map(p=>p.pitchSlot.row))].sort((a,b)=>b-a)
+      .map(row=>placed.filter(p=>p.pitchSlot.row===row).sort((a,b)=>b.pitchSlot.column-a.pitchSlot.column)) : null;
+    const unplaced = !grid ? `<p class="lineup-position-note">Данных о точных позициях пока недостаточно. ${predicted ? 'Ниже — кандидаты на старт.' : 'Ниже — стартовый состав.'}</p><div class="bench-list">${starters.map(player => `<button type="button" class="bench-player" ${playerProfileAttrs(player,clubKey)}>${playerAvatar(player,'bench-avatar')}<span>${safe(player.lineupNumber||player.number||'')} ${safe(playerName(player))}</span></button>`).join('')}</div>` : '';
+    return `<section class="lineup-team${predicted ? ' predicted-team' : ''}"><div class="lineup-teamhead">${clubBadge(clubKey, 'lineup-crest')}<strong>${safe(clubs[clubKey]?.short || clubKey)}</strong>${predicted ? '<span class="predicted-label">Прогноз</span>' : ''}${grid ? `<span class="formation-badge">${safe(formation)}</span>` : ''}</div>
+      ${grid ? `<div class="lineup-pitch" aria-label="Расстановка: ${safe(formation)}">${grid.map(row=>formationRow(row,clubKey)).join('')}</div>` : unplaced}
+      ${predicted && grid ? '<p class="lineup-position-note">Позиции — по сыгранным матчам сезона. Состав — по игровым минутам.</p>' : ''}
+      ${bench.length ? `<div class="bench-title">ЗАПАСНЫЕ · ${bench.length}</div><div class="bench-list">${bench.map(player=>`<button type="button" class="bench-player" ${playerProfileAttrs(player,clubKey)}>${playerAvatar(player,'bench-avatar')}<span>${safe(player.lineupNumber||player.number||'')} ${safe(playerName(player))}</span></button>`).join('')}</div>` : ''}</section>`;
   }
   function lineupsMarkup(payload, match) {
     const data = payload?.data || payload || {}; const home = data.home || data.homeTeam || {}; const away = data.away || data.awayTeam || {};
@@ -309,20 +309,14 @@
     const canPredict = match.status === 'soon' && kickoff > Date.now();
     const prediction = canPredict && payload?.prediction?.basis === 'season-league-minutes' ? payload.prediction : null;
     if (!homeList.length && !awayList.length && !prediction) return `<div class="empty-note">${canPredict ? 'Составы пока не опубликованы. Данных для прогноза нет.' : 'Составы матча недоступны.'}</div>`;
-    const fallbackPhotos = [...homeList, ...lineupLists(home).bench, ...awayList, ...lineupLists(away).bench].filter((player) => player.portraitSource === 'API-Football' && mediaUrl(player.image || player.playerImage || player.photo)).length;
-    const provider = payload?.provider || data.provider || 'GOAL API';
-    const sourceNote = homeList.length || awayList.length
-      ? `<div class="portrait-source-note">Опубликованные составы — ${safe(provider)}.${fallbackPhotos ? ` ${fallbackPhotos} резервных портрета API-Football.` : ''}</div>` : '';
     const team = (side, confirmed) => {
       const key = match[side];
       const projected = prediction?.[side];
       if (lineupLists(confirmed).starters.length || !projected) return teamLineupMarkup(confirmed, key, data[`${side}Formation`] || match[`${side}Formation`]);
-      const roles = [['keepers','Вратарь'],['defenders','Защита'],['midfielders','Полузащита'],['forwards','Нападение']];
-      const players = lineupLists(projected).starters;
-      return `<section class="predicted-team"><header class="lineup-teamhead">${clubBadge(key, 'lineup-crest')}<strong>${safe(clubs[key]?.short || key)}</strong><span class="predicted-label">Прогноз · ${safe(projected.formation)}</span></header>${roles.map(([role,label]) => `<div class="predicted-role"><h3>${label}</h3><ul>${players.filter(p => playerGroup(p) === role).map(p => `<li><button type="button" ${playerProfileAttrs(p, key)}><span>${safe(playerName(p))}</span><small>${safe(p.minutes)} мин</small></button></li>`).join('')}</ul></div>`).join('')}</section>`;
+      return teamLineupMarkup(projected, key, '', true);
     };
-    const note = prediction ? '<p class="prediction-note">В каждой линии — игроки с наибольшим числом минут в сезоне РПЛ по данным Flashscore. Схема условная; травмы и дисквалификации не учитываются.</p>' : '';
-    return `${note}${sourceNote}${team('home',home)}${team('away',away)}`;
+    const note = prediction ? '<p class="prediction-note">Предварительная расстановка. Травмы и дисквалификации не учтены.</p>' : '';
+    return `${note}${team('home',home)}${team('away',away)}`;
   }
   async function loadLineups(match) {
     const root = document.getElementById('matchLineups'); if (!root) return;
@@ -342,40 +336,51 @@
     finally { lineupPending.delete(match.id); }
   }
   function applyMatchInsights(match, result) {
-    if (result.events?.ok && result.events.rows.length) match.events = result.events.rows;
-    if (result.statistics?.ok && result.statistics.rows.length) match.stats = result.statistics.rows;
+    const contentChanged=(result.events?.ok&&(JSON.stringify(match.events)!==JSON.stringify(result.events.rows)||(result.events.records&&JSON.stringify(match.eventDetails)!==JSON.stringify(result.events.records))))||(result.statistics?.ok&&JSON.stringify(match.stats)!==JSON.stringify(result.statistics.rows));
+    if (result.events?.ok) {
+      match.events = result.events.rows;
+      if (result.events.records) match.eventDetails = result.events.records;
+    }
+    if (result.statistics?.ok) match.stats = result.statistics.rows;
     if (result.events?.ok) match.eventsProvider = result.events.provider;
     if (result.statistics?.ok) match.statisticsProvider = result.statistics.provider;
-    const nextStatus = {
-      events: result.events?.ok ? (result.events.rows.length ? 'loaded' : 'empty') : 'failed',
-      statistics: result.statistics?.ok ? (result.statistics.rows.length ? 'loaded' : 'empty') : 'failed'
-    };
-    const changed = match.detailDataStatus?.events !== nextStatus.events || match.detailDataStatus?.statistics !== nextStatus.statistics;
+    const nextStatus = {...match.detailDataStatus};
+    for(const resource of ['events','statistics'])if(result[resource])nextStatus[resource]=result[resource].ok?(result[resource].rows.length?'loaded':'empty'):'failed';
+    const changed = contentChanged || match.detailDataStatus?.events !== nextStatus.events || match.detailDataStatus?.statistics !== nextStatus.statistics;
     match.detailDataStatus = nextStatus;
     return changed;
   }
-  async function loadMatchInsights(match) {
+  async function loadMatchInsights(match, {eventsOnly=false} = {}) {
     if (!match || match.status === 'soon') return;
     const id = String(match.id);
     const cached = matchInsightsCache.get(id);
+    const resources=eventsOnly?['events']:['events','statistics'];
+    const updatePreview=()=>{document.querySelectorAll('.matchday-open[data-match]').forEach(button=>{if(button.dataset.match===id){const preview=button.querySelector('.live-flow');if(preview)preview.outerHTML=window.rplMatchPresentation?.liveProgress(match)||''}})};
     const now = Date.now();
-    const cacheTtl = match.status === 'finished' ? 24 * 60 * 60_000 : 60_000;
-    if (cached && now - cached.at < cacheTtl) { if (applyMatchInsights(match, cached)) window.refreshDetailedMatch?.(id); return; }
-    if (matchInsightsPending.has(id)) return matchInsightsPending.get(id);
+    const cacheTtl = match.status === 'finished' ? 5 * 60_000 : 15_000;
+    // Keep already received events visible while another resource is still loading.
+    if (cached && now - cached.at < cacheTtl && applyMatchInsights(match, cached)) window.refreshDetailedMatch?.(id);
+    if (cached && resources.every(resource=>cached[resource]) && now - cached.at < cacheTtl) { if (applyMatchInsights(match, cached)) window.refreshDetailedMatch?.(id); updatePreview(); return; }
+    if (matchInsightsPending.has(id)) {await matchInsightsPending.get(id);return loadMatchInsights(match,{eventsOnly});}
     const request = (async () => {
       const result = { at: Date.now(), events: null, statistics: null };
-      await Promise.all(['events', 'statistics'].map(async (resource) => {
+      await Promise.all(resources.map(async (resource) => {
         try {
           const response = await fetch(`/api/fixtures/${encodeURIComponent(id)}/${resource}`, { cache: 'no-store' });
           if (!response.ok) throw new Error(`HTTP ${response.status}`);
           const payload = await response.json();
-          result[resource] = { ok: true, provider: payload.provider || 'GOAL API', rows: resource === 'events' ? normalizeEventsPayload(payload) : normalizeStatsPayload(payload) };
+          result[resource] = { ok: true, provider: payload.provider || 'GOAL API', rows: resource === 'events' ? normalizeEventsPayload(payload) : normalizeStatsPayload(payload), ...(resource === 'events' ? { records: window.rplMatchInsights.eventRecords(payload) } : {}) };
         } catch {
           result[resource] = { ok: false, rows: [] };
         }
+        matchInsightsCache.set(id, { ...result, at: Date.now() });
+        if (applyMatchInsights(match, { [resource]: result[resource] })) window.refreshDetailedMatch?.(id);
+        updatePreview();
       }));
+      result.at = Date.now();
       matchInsightsCache.set(id, result);
       if (applyMatchInsights(match, result)) window.refreshDetailedMatch?.(id);
+      updatePreview();
     })();
     matchInsightsPending.set(id, request);
     try { await request; }
@@ -397,8 +402,8 @@
       const sum = Math.max(0, homeValue) + Math.max(0, awayValue);
       const homeShare = sum ? Math.max(0, homeValue) / sum * 100 : 50;
       return `<div class="stat-row"><span>${safe(s[1])}</span><div><div class="stat-label">${safe(s[0])}</div><div class="stat-track"><div class="stat-fill" style="width:${homeShare}%"></div></div></div><span>${safe(s[2])}</span></div>`;
-    }).join('') : '<div class="empty-note">Статистика зависит от покрытия сезона и доступности Flashscore и GOAL API.</div>';
-    sheet.innerHTML = `<div class="sheet-handle"></div><div class="sheet-head"><div><h2>Матч-центр</h2><p>${m.date} · ${m.venue || 'Стадион не указан'} · ${safe(dataProviderName())}</p></div><button class="close-button" data-close>×</button></div><div class="match-card" data-live-match="${safe(m.id)}" style="cursor:default"><div class="match-top"><span class="match-round">ТУР ${m.round} · РПЛ</span>${statusText(m)}</div><div class="match-row"><div class="team-side">${clubBadge(m.home)}<span class="team-name">${safe(h.short)}</span></div><div class="score ${m.status === 'soon' ? 'upcoming' : ''}">${safe(m.score)}</div><div class="team-side away"><span class="team-name">${safe(a.short)}</span>${clubBadge(m.away)}</div></div><div class="match-foot"><span class="venue">${safe(m.venue || 'Стадион не указан')}</span><span>СЧЁТ: ${safe(dataProviderName())}</span></div></div><div class="section-heading"><h2>Составы и схемы</h2><span class="micro">${safe(dataProviderName())}</span></div><div id="matchLineups" class="match-lineups"><div class="empty-note">Составы запрашиваются при открытии матча.</div></div><div class="section-heading"><h2>События</h2><span class="micro">${m.events.length ? `${m.events.length} ЭПИЗОДА` : 'НЕТ ДАННЫХ'}</span></div>${events}<div class="section-heading"><h2>Цифры матча</h2><span class="micro">${m.stats.length ? safe(m.statisticsProvider || dataProviderName()) : 'НЕ В ОТВЕТЕ'}</span></div><div class="stats-block">${stats}</div><div class="empty-note">Доступность событий и статистики зависит от покрытия и квоты API.</div>`;
+    }).join('') : '<div class="empty-note">Статистика матча пока недоступна.</div>';
+    sheet.innerHTML = `<div class="sheet-handle"></div><div class="sheet-head"><div><h2>Матч-центр</h2><p>${m.date} · ${m.venue || 'Стадион не указан'}</p></div><button class="close-button" data-close>×</button></div><div class="match-card" data-live-match="${safe(m.id)}" style="cursor:default"><div class="match-top"><span class="match-round">ТУР ${m.round} · РПЛ</span>${statusText(m)}</div><div class="match-row"><div class="team-side">${clubBadge(m.home)}<span class="team-name">${safe(h.short)}</span></div><div class="score ${m.status === 'soon' ? 'upcoming' : ''}">${safe(m.score)}</div><div class="team-side away"><span class="team-name">${safe(a.short)}</span>${clubBadge(m.away)}</div></div><div class="match-foot"><span class="venue">${safe(m.venue || 'Стадион не указан')}</span><span>РПЛ</span></div></div><div class="section-heading"><h2>Составы и схемы</h2><span class="micro">Кромка</span></div><div id="matchLineups" class="match-lineups"><div class="empty-note">Составы запрашиваются при открытии матча.</div></div><div class="section-heading"><h2>События</h2><span class="micro">${m.events.length ? `${m.events.length} ЭПИЗОДА` : 'НЕТ ДАННЫХ'}</span></div>${events}<div class="section-heading"><h2>Цифры матча</h2><span class="micro">${m.stats.length ? 'РПЛ' : 'НЕ В ОТВЕТЕ'}</span></div><div class="stats-block">${stats}</div><div class="empty-note"></div>`;
     openOverlay();
     loadLineups(m);
   }
@@ -409,6 +414,7 @@
     if (!hasFixtureArray || !tableRows.length) throw new Error('Unexpected RPL data response shape');
     const newMatches = fixtureRows.map(fixture).filter((m) => m.dateKey).sort((a, b) => a.dateKey.localeCompare(b.dateKey) || (fixtureKickoff(a) || '99:99').localeCompare(fixtureKickoff(b) || '99:99'));
     const newTable = tableRows.map(standing);
+    migrateFollowedClubKeys(id => idToKey.get(String(id).replace(/^goal_/, '')) || id);
     if (fixtureRows.length && !newMatches.length) throw new Error('RPL fixture dates could not be parsed');
     matches.splice(0, matches.length, ...newMatches);
     if (newMatches.length) {
@@ -464,6 +470,6 @@
     if (seasonLabel && /^\d{4}$/.test(String(window.rplSeason))) seasonLabel.textContent = `РПЛ · ${window.rplSeason}/${String(Number(window.rplSeason) + 1).slice(-2)}`;
     return refresh({ quiet: true }).catch((error) => { console.warn('RPL data providers unavailable; retaining explicit demo view', error); setDataRibbon(true); render(); });
   }).catch(() => setDataRibbon()).finally(() => { if (!refreshPending) setRefreshBusy(false); });
-  setInterval(() => { if (window.isLiveData && document.visibilityState === 'visible') refresh({ quiet: true }).catch((e) => console.warn('GOAL API refresh failed', e)); }, 5 * 60 * 1000);
+  setInterval(() => { if (window.isLiveData && document.visibilityState === 'visible') refresh({ quiet: true }).catch((e) => console.warn('GOAL API refresh failed', e)); }, 30 * 1000);
   if ('serviceWorker' in navigator) navigator.serviceWorker.register('/service-worker.js').catch((e) => console.warn('PWA worker unavailable', e));
 })();

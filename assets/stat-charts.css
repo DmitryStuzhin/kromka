@@ -1,0 +1,186 @@
+/* Scoreboard charts use a common scale within a comparison and always show exact values. */
+:is(.player-detail-page,.club-hub) {
+  --stat-primary: var(--matchday-blue);
+  --stat-secondary: #87a7df;
+  --stat-history: #90a8ce;
+  --stat-against: #7b8aa3;
+  --stat-won: #19674d;
+  --stat-drawn: #566983;
+  --stat-lost: #aa3c43;
+  --stat-surface: #eff4fb;
+  --stat-track: #dbe5f3;
+}
+.club-chart { margin-inline: var(--matchday-inset); }
+.stat-surface {
+  padding: 13px 14px;
+  border-radius: 12px;
+  background: var(--stat-surface);
+}
+.stat-surface h3, .stat-club-goals h3 {
+  margin: 0 0 10px;
+  color: var(--matchday-ink);
+  font: 700 14px/1.25 var(--body);
+}
+.stat-surface h3 small {
+  color: var(--matchday-muted);
+  font: 500 12px/1.2 var(--body);
+}
+.stat-track-line {
+  display: flex;
+  height: 8px;
+  overflow: hidden;
+  border-radius: 4px;
+  background: var(--stat-track);
+}
+.stat-track-line i { flex: 0 0 var(--share); min-width: 0; background: var(--stat-colour); }
+.stat-track-line i + i { box-shadow: inset 2px 0 var(--stat-surface); }
+.stat-fill-primary { --stat-colour:var(--stat-primary); }
+.stat-fill-secondary { --stat-colour:var(--stat-secondary); }
+.stat-fill-history { --stat-colour:var(--stat-history); }
+.stat-fill-against { --stat-colour:var(--stat-against); }
+.stat-fill-won { --stat-colour:var(--stat-won); }
+.stat-fill-drawn { --stat-colour:var(--stat-drawn); }
+.stat-fill-lost { --stat-colour:var(--stat-lost); }
+.stat-legend, .stat-footline {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 7px 19px;
+  margin: 9px 0 0;
+  color: var(--matchday-muted);
+  font: 500 12px/1.3 var(--body);
+}
+.stat-legend div, .stat-footline div { display: flex; gap: 5px; align-items: baseline; }
+.stat-legend i { display: inline-block; width: 8px; height: 8px; margin-inline-end: 5px; border-radius: 2px; background: var(--stat-colour); }
+.stat-legend dd, .stat-footline dd { margin: 0; color: var(--matchday-ink); font-weight: 750; font-variant-numeric: tabular-nums; }
+.stat-footline { margin-block: 11px 7px; }
+.stat-switch {
+  display: inline-flex;
+  flex-wrap: wrap;
+  gap: 2px;
+  padding: 3px;
+  margin-bottom: 10px;
+  border: 1px solid var(--matchday-line);
+  border-radius: 9px;
+}
+.stat-switch button {
+  min-height: 44px;
+  padding-inline: 12px;
+  border: 0;
+  border-radius: 6px;
+  background: #fff;
+  color: var(--matchday-muted);
+  font: 650 13px/1.2 var(--body);
+}
+.stat-switch button[aria-pressed="true"] { background: var(--stat-primary); color: #fff; }
+.stat-selects {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
+  gap: 8px;
+  margin-bottom: 10px;
+}
+.stat-selects label { color: var(--matchday-muted); font: 500 12px/1.25 var(--body); }
+.stat-selects select {
+  display: block;
+  width: 100%;
+  min-height: 44px;
+  margin-top: 4px;
+  padding-inline: 6px;
+  border: 1px solid var(--matchday-line);
+  border-radius: 7px;
+  background: #fff;
+  color: var(--matchday-ink);
+  font: 650 13px/1.25 var(--body);
+}
+.stat-career-chart, .stat-form { margin: 0; padding: 0; list-style: none; }
+.stat-career-chart li, .stat-comparison-line {
+  display: grid;
+  grid-template-columns: minmax(78px, .9fr) minmax(0, 2fr) minmax(26px, auto);
+  min-height: 35px;
+  align-items: center;
+  gap: 9px;
+}
+.stat-career-chart li + li { margin-top: 6px; }
+.stat-career-season { min-width: 0; }
+.stat-career-season strong { font: 750 13px/1.15 var(--body); white-space: nowrap; }
+.stat-career-season sup { margin-left: 2px; color: var(--stat-primary); }
+.stat-career-season small {
+  display: block;
+  overflow: hidden;
+  color: var(--matchday-muted);
+  font: 500 11px/1.2 var(--body);
+  white-space: nowrap;
+  text-overflow: ellipsis;
+}
+.stat-career-chart b, .stat-comparison-line b { justify-self: end; font-size: 13px; font-variant-numeric: tabular-nums; }
+.stat-note { margin: 7px 0 0; color: var(--matchday-muted); font: 500 11px/1.4 var(--body); }
+.stat-league-label { margin-bottom: 8px; font-size: 13px; }
+.stat-disclosure { margin-top: 6px; border-bottom: 1px solid var(--matchday-line); }
+.stat-disclosure summary { min-height: 44px; padding: 12px 3px; color: var(--matchday-blue); font: 650 13px/1.4 var(--body); cursor: pointer; }
+.stat-disclosure .stat-footline { margin: 0 3px 10px; }
+.stat-table-scroll { max-width: 100%; overflow-x: auto; }
+.stat-table { width: 100%; border-collapse: collapse; font: 500 12px/1.35 var(--body); font-variant-numeric: tabular-nums; }
+.stat-career-table { min-width: 350px; }
+.stat-table :is(th,td) { padding: 7px 5px; border-top: 1px solid var(--matchday-line); text-align: right; }
+.stat-table :is(th,td):first-child { text-align: left; }
+.stat-table th small { display: block; color: var(--matchday-muted); font-weight: 500; }
+.stat-club-goals { margin: 12px 0 0; }
+.stat-club-goals h3 { margin-bottom: 2px; }
+.stat-comparison-line { color:var(--matchday-ink); font: 600 12px/1.25 var(--body); }
+.stat-form { display: grid; grid-template-columns: repeat(5, minmax(0, 1fr)); gap: 6px; }
+.stat-form button {
+  display: grid;
+  justify-items: center;
+  align-content: center;
+  gap: 5px;
+  width: 100%;
+  min-height: 82px;
+  padding: 5px 1px;
+  border: 1px solid var(--matchday-line);
+  border-radius: 8px;
+  background: #fff;
+  color: var(--matchday-ink);
+  cursor: pointer;
+}
+.stat-form button:hover { background: var(--stat-surface); }
+.stat-form .team-mark { width: 22px; height: 22px; }
+.stat-form b { font: 750 13px/1.1 var(--body); white-space: nowrap; }
+.stat-form-result {
+  min-width: 20px;
+  padding: 3px 3px;
+  border-radius: 4px;
+  background: var(--stat-colour);
+  color: #fff;
+  font: 750 10px/1 var(--body);
+}
+:is(.stat-switch,.stat-selects,.stat-disclosure,.stat-form) :focus-visible {
+  outline: 2px solid var(--matchday-blue);
+  outline-offset: 2px;
+}
+@media (max-width: 360px) {
+  .stat-surface { padding-inline: 10px; }
+  .stat-career-chart li, .stat-comparison-line { gap: 6px; }
+  .stat-form { gap: 4px; }
+  .stat-legend { column-gap: 10px; }
+}
+
+.stat-donut-layout { display:grid; grid-template-columns:minmax(112px,140px) minmax(0,1fr); align-items:center; gap:clamp(12px,4vw,26px); }
+.stat-donut-ring { position:relative; aspect-ratio:1; min-width:0; }
+.stat-donut-ring svg { display:block; width:100%; height:100%; overflow:visible; }
+.stat-donut-track,.stat-donut-segment { fill:none; stroke-width:15; }
+.stat-donut-track { stroke:var(--stat-track); }
+.stat-donut-segment { stroke:var(--stat-colour); }
+.stat-donut-total { position:absolute; inset:0; display:flex; flex-direction:column; align-items:center; justify-content:center; gap:2px; pointer-events:none; }
+.stat-donut-total b { color:var(--matchday-ink); font:800 28px/1.1 var(--body); font-variant-numeric:tabular-nums; }
+.stat-donut-total span { color:var(--matchday-muted); font:500 11px/1.2 var(--body); }
+.stat-donut-legend { display:grid; gap:11px; margin:0; }
+.stat-donut-legend > div { display:grid; grid-template-columns:minmax(0,1fr) auto; align-items:baseline; gap:7px; }
+.stat-donut-legend dt { color:var(--matchday-muted); font:600 12px/1.3 var(--body); }
+.stat-donut-legend dt i { display:inline-block; width:8px; height:8px; margin-inline-end:6px; background:var(--stat-colour); border-radius:2px; }
+.stat-donut-legend dd { display:flex; align-items:baseline; gap:7px; margin:0; font-variant-numeric:tabular-nums; }
+.stat-donut-legend dd b { color:var(--matchday-ink); font:750 15px/1.2 var(--body); }
+.stat-donut-legend dd span { min-width:35px; color:var(--matchday-muted); font:500 11px/1.2 var(--body); text-align:right; }
+@media(max-width:360px) {
+  .stat-donut-layout { grid-template-columns:106px minmax(0,1fr); gap:10px; }
+  .stat-donut-legend dt { font-size:11px; }
+  .stat-donut-legend dd { gap:4px; }
+}

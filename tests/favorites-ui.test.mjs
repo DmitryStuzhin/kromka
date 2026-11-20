@@ -36,14 +36,17 @@ test('match and club follow controls expose pressed state and PWA shell caches t
 });
 
 
-test('club comparison separates table provenance and shows only completed-season head-to-head data', () => {
+test('club comparison waits for two selections from the league table', () => {
   assert.match(html, /function comparisonCard\(\)/);
-  assert.match(html, /id="compareLeft"/);
+  assert.match(html, /compareLeft='', compareRight=''/);
+  assert.match(html, /data-compare-slot=/);
+  assert.match(html, /data-compare-club=/);
+  assert.match(html, /if\(!left\|\|!right\)return start/);
   assert.match(html, /Очков за матч/);
   assert.match(html, /headToHead\(matches,compareLeft,compareRight\)/);
   assert.match(html, /teamSplits\(matches,compareLeft\)/);
   assert.match(html, /Очные встречи/);
-  assert.match(html, /Таблица GOAL API и матчевые разрезы завершённых игр сезона/);
+  assert.doesNotMatch(html, /Таблица GOAL API/);
   assert.match(html, /завершённых очных встреч/);
   assert.match(live, /comparisonCard === 'function' \? comparisonCard\(\)/);
 });

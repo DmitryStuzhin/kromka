@@ -1,3 +1,4 @@
+import './assets/lineup-layout.js';
 const TEAMS = Object.freeze({
   din: { id: 'cmr7uolsy8mghrx06jog9s5dt', name: 'Dynamo Moscow' },
   zen: { id: 'cmr7uolst8mgfrx06mqhdh3qs', name: 'Zenit Saint Petersburg' },
@@ -139,6 +140,7 @@ function flashscorePlayer(row, rosterById) {
     number: rawNumber === null || rawNumber === undefined || rawNumber === '' ? (known?.number ?? '') : String(rawNumber),
     playerPosition: position,
     type: position,
+    portraitPath: flashscorePortraitPath(id),
     lineupNumber: rawNumber === null || rawNumber === undefined || rawNumber === '' ? (known?.number ?? '') : String(rawNumber)
   };
   if (known?.image) player.image = known.image;
@@ -176,26 +178,32 @@ export function flashscoreMatchLineups(payload, fixture, rosterById = new Map())
 
 export function flashscoreMatchEvents(payload, fixture, rosterById = new Map()) {
   const output = [];
-  const home = TEAM_BY_ID.get(fixture?.homeTeamId);
-  const away = TEAM_BY_ID.get(fixture?.awayTeamId);
+  const home = TEAM_BY_ID.get(fixture?.homeTeamId), away = TEAM_BY_ID.get(fixture?.awayTeamId);
+  // Incident codes identify actions; the feed's description is usually just the player's name.
+  const kinds = { 1:'Жёлтая карточка', 2:'Красная карточка', 3:'Гол', 4:'Автогол', 5:'Пенальти', 6:'Замена', 7:'Замена', 8:'Голевая передача', 10:'Гол с пенальти', 11:'Незабитый пенальти' };
+  const playerOf = part => ({ name: rosterById.get(String(part?.[2] || ''))?.name || String(part?.[1] || '').trim(), id: String(part?.[2] || '') });
   for (const row of Array.isArray(payload?.ev) ? payload.ev : []) {
     if (!Array.isArray(row)) continue;
-    const [side, minute, parts] = row;
-    const team = Number(side) === 1 ? home : Number(side) === 2 ? away : null;
-    for (const part of Array.isArray(parts) ? parts : []) {
-      if (!Array.isArray(part)) continue;
-      const [code, description, playerId] = part;
-      const text = String(description || '').trim();
-      const player = rosterById.get(String(playerId || ''));
-      const event = {
-        minute: String(minute || '—'),
-        type: text || String(code ?? 'Событие'),
-        description: [text || String(code ?? 'Событие'), player?.name].filter(Boolean).join(' · '),
-        eventCode: code,
-        playerId: String(playerId || '')
-      };
-      if (player?.name) event.player = { name: player.name };
+    const [side, minute, rawParts] = row, team = Number(side) === 1 ? home : Number(side) === 2 ? away : null;
+    const parts = (Array.isArray(rawParts) ? rawParts : []).filter(Array.isArray);
+    const outgoing = parts.filter(part => Number(part[0]) === 6);
+    const incoming = parts.filter(part => Number(part[0]) === 7);
+    const goal = parts.some(part => [3,4,10].includes(Number(part[0])));
+    let substitutionIndex = 0;
+    for (const part of parts) {
+      const code = Number(part[0]), player = playerOf(part);
+      if (code === 8 && goal || code === 6 && incoming.length || code === 5 && parts.some(part => [10,11].includes(Number(part[0])))) continue;
+      const event = { minute: String(minute || '—'), type: kinds[code] || 'Событие', eventCode: code, playerId: player.id, player };
       if (team) event.team = { id: team.id, name: team.name };
+      if (code === 7 && outgoing[substitutionIndex]) {
+        event.playerOut = playerOf(outgoing[substitutionIndex++]);
+        event.playerIn = player;
+      } else {
+        const assist = goal && [3,4,10].includes(code) ? parts.find(part => Number(part[0]) === 8) : null;
+        if (assist) event.assist = playerOf(assist);
+        const direction = code === 6 ? '↓ ' : code === 7 ? '↑ ' : '';
+        event.description = [event.type, player.name && direction + player.name, event.assist?.name && `пас: ${event.assist.name}`].filter(Boolean).join(' · ');
+      }
       output.push(event);
     }
   }
@@ -213,6 +221,18 @@ export function flashscoreMatchStatistics(payload) {
   return { data: statistics, provider: 'Flashscore' };
 }
 
+export function playerSeasonStats(stats) {
+  if (!Array.isArray(stats)) return null;
+  const keys = ['played', 'minutes', 'goals', 'assists', 'yellow', 'red'];
+  const result = Object.fromEntries(keys.map((key, i) => [key, intOrNull(stats[i])]));
+  return Object.values(result).some(value => value !== null) ? result : null;
+}
+
+export function flashscorePortraitPath(id) {
+  const value = String(id ?? '');
+  return /^[a-z0-9-]{1,100}\/[a-z0-9]{8}$/i.test(value) ? `/api/player-portraits/${value}` : '';
+}
+
 export function flashscoreRoster(players, teamCode) {
   const rows = Array.isArray(players) ? players.filter((player) => player?.t === teamCode) : [];
   return {
@@ -228,6 +248,7 @@ export function flashscoreRoster(players, teamCode) {
         playerPosition: position,
         age: intOrNull(player?.age),
         image: safeImageId ? `https://static.flashscore.com/res/image/data/${safeImageId}` : '',
+        portraitPath: flashscorePortraitPath(player.id),
         portraitSource: safeImageId ? 'Flashscore' : ''
       };
     }).filter((player) => player.id && player.name),
@@ -235,7 +256,24 @@ export function flashscoreRoster(players, teamCode) {
   };
 }
 
-export function predictFlashscoreLineup(players, teamCode) {
+export function formationLines(value) {
+  const label = String(value ?? '').trim().replace(/\s+/g, '');
+  if (!/^[1-5](?:-[1-6]){2,4}$/.test(label)) return null;
+  const lines = label.split('-').map(Number);
+  return lines.reduce((a, b) => a + b, 0) === 10 ? lines : null;
+}
+
+export function mostUsedFormations(values) {
+  const counts = new Map();
+  for (const value of values) {
+    const label = formationLines(value)?.join('-');
+    if (label) counts.set(label, (counts.get(label) || 0) + 1);
+  }
+  // Input is newest first; stable sort breaks ties in favor of the most recent use.
+  return [...counts].sort((a, b) => b[1] - a[1]).map(([label]) => label);
+}
+
+export function predictFlashscoreLineup(players, teamCode, preferred = []) {
   if (!teamCode) return null;
   const groups = { GK: [], DF: [], MF: [], FW: [] };
   const byId = new Map();
@@ -250,15 +288,57 @@ export function predictFlashscoreLineup(players, teamCode) {
   }
   for (const p of byId.values()) groups[p.p].push(p);
   for (const group of Object.values(groups)) group.sort((a, b) => b.minutes - a.minutes || (intOrNull(b.lg[0]) || 0) - (intOrNull(a.lg[0]) || 0) || a.id.localeCompare(b.id));
-  const shape = [[4, 3, 3], [4, 4, 2], [4, 5, 1]].find(([d, m, f]) =>
-    groups.GK.length && groups.DF.length >= d && groups.MF.length >= m && groups.FW.length >= f);
+  const shape = [...preferred, '4-3-3', '4-4-2', '4-2-3-1'].map(formationLines).find(lines => {
+    if (!lines) return false;
+    const d = lines[0], f = lines.at(-1), m = 10 - d - f;
+    return groups.GK.length && groups.DF.length >= d && groups.MF.length >= m && groups.FW.length >= f;
+  });
   if (!shape) return null;
-  const [d, m, f] = shape;
+  const d = shape[0], f = shape.at(-1), m = 10 - d - f;
   const startingLineups = [...groups.GK.slice(0, 1), ...groups.DF.slice(0, d), ...groups.MF.slice(0, m), ...groups.FW.slice(0, f)].map(p => ({
     id: p.id, name: String(p.n).trim(), number: p.no ?? '', type: POSITION_NAMES[p.p], playerPosition: POSITION_NAMES[p.p],
-    age: intOrNull(p.age), minutes: p.minutes
+    age: intOrNull(p.age), minutes: p.minutes, portraitPath: flashscorePortraitPath(p.id)
   }));
   return { formation: shape.join('-'), startingLineups };
+}
+
+export function predictPositionedLineup(players, teamCode, preferred, observations) {
+  const layout = globalThis.rplLineupLayout;
+  const candidates = (Array.isArray(players) ? players : []).filter(p =>
+    p.t === teamCode && p.id && p.n && Array.isArray(p.lg) && intOrNull(p.lg[1]) > 0 && observations.has(p.id)
+  ).sort((a,b)=>String(a.id).localeCompare(String(b.id)));
+  for (const formation of [...new Set(preferred)]) {
+    const slots = layout.slots(formation);
+    if(slots.length!==11 || candidates.length<11) continue;
+    // One player per slot. Incompatible positions are excluded before minutes are ranked.
+    let dp = new Map([[0,{score:0, picks:[]}]]);
+    for(const player of candidates) {
+      const next = new Map(dp);
+      const evidence = observations.get(player.id);
+      const total = [...evidence.values()].reduce((a,b)=>a+b,0);
+      const compatibility = slots.map(slot => Math.max(0,...[...evidence].map(([role,frequency]) =>
+        layout.fit(role,slot.role) * (.9 + .1 * frequency/total))));
+      for(const [mask,state] of dp) {
+        for(let i=0;i<11;i++) {
+          if(mask&(1<<i) || compatibility[i]===0) continue;
+          const nextMask=mask|(1<<i);
+          const score=state.score+Number(player.lg[1])*compatibility[i];
+          if(!next.has(nextMask)||next.get(nextMask).score<score)
+            next.set(nextMask,{score,picks:[...state.picks,{player,index:i}]});
+        }
+      }
+      dp=next;
+    }
+    const best=dp.get((1<<11)-1);
+    if(!best)continue;
+    const startingLineups=best.picks.sort((a,b)=>a.index-b.index).map(({player:p,index})=>({
+      id:p.id,name:p.n,number:p.no??'',type:POSITION_NAMES[p.p],playerPosition:POSITION_NAMES[p.p],
+      age:intOrNull(p.age),minutes:p.lg[1],portraitPath:flashscorePortraitPath(p.id),
+      lineupPosition:String(index+1),pitchSlot:slots[index],tacticalRole:slots[index].role
+    }));
+    return {formation,startingLineups,positionBasis:'season-lineup-order'};
+  }
+  return null;
 }
 
 export function flashscoreRosterById(players, teamCode) {

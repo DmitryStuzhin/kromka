@@ -41,95 +41,49 @@
   font: 400 10px/1.2 var(--mono);
 }
 
-.match-timeline {
-  position: relative;
-  display: grid;
-  gap: 8px;
-  grid-template-columns: minmax(0, 1fr);
+.main.matchday-detail .match-detail-page > .detail-card.match-events-card:not([hidden]) {
   margin: 0;
-  padding: 4px 0;
-  list-style: none;
+  padding: 18px var(--matchday-inset, 16px);
+  border: 0;
+  border-radius: 0;
+  box-shadow: none;
 }
-.match-timeline::before {
-  position: absolute;
-  top: 16px;
-  bottom: 16px;
-  left: 50%;
-  width: 1px;
-  background: #dfe1d7;
-  content: "";
-}
-.timeline-event {
-  position: relative;
-  display: grid;
-  min-height: 54px;
-  grid-template-columns: minmax(0, 1fr) 48px minmax(0, 1fr);
-  gap: 8px;
-  align-items: center;
-}
-.timeline-event::before {
-  position: absolute;
-  z-index: 1;
-  top: 50%;
-  left: 50%;
-  width: 8px;
-  height: 8px;
-  border: 2px solid var(--white);
-  border-radius: 50%;
-  background: #777970;
-  content: "";
-  transform: translate(-50%, -50%);
-}
-.timeline-event.event-goal::before { background: #789144; }
-.timeline-event.event-yellow-card::before { border-radius: 2px; background: #c29a3b; }
-.timeline-event.event-red-card::before { border-radius: 2px; background: #ba5549; }
-.timeline-period {
-  z-index: 1;
-  grid-column: 1;
-  justify-self: center;
-  padding: 3px 8px;
-  border: 1px solid #e1e2d9;
-  border-radius: 6px;
-  background: var(--white);
-  color: #686d63;
-  font: 400 10px/1.2 var(--mono);
-}
-.timeline-event-copy {
-  display: flex;
-  min-width: 0;
-  flex-direction: column;
-  gap: 4px;
-  padding: 8px 10px;
-  border: 1px solid #e8e8df;
-  border-radius: 8px;
-  background: #f7f7f1;
-}
-.timeline-event.home .timeline-event-copy { grid-column: 1; grid-row: 1; text-align: right; }
-.timeline-event.away .timeline-event-copy { grid-column: 3; grid-row: 1; text-align: left; }
-.timeline-event.unknown .timeline-event-copy { grid-column: 1 / 4; grid-row: 1; margin-left: 56px; text-align: left; }
-.timeline-event-copy small {
-  color: #62675d;
-  font: 500 10px/1.2 var(--body);
-}
-.timeline-event-copy span {
-  overflow-wrap: anywhere;
-  color: var(--ink);
-  font: 400 12px/1.3 var(--body);
-}
-.timeline-event time {
-  z-index: 2;
-  grid-column: 2;
-  grid-row: 1;
-  justify-self: center;
-  min-width: 42px;
-  padding: 5px 3px;
-  border: 1px solid #dcdcd2;
-  border-radius: 6px;
-  background: var(--white);
-  color: #34382f;
-  font: 500 11px/1 var(--mono);
-  font-variant-numeric: tabular-nums;
-  text-align: center;
+.match-events-card .detail-section-head { margin-bottom: 16px; align-items: center; }
+.match-events-card .detail-section-head h2 { font: 700 19px/1.2 var(--body); color: var(--matchday-ink); }
+.match-events-card .detail-source { padding: 0; border: 0; background: transparent; color: var(--matchday-muted); font: 400 12px/1.3 var(--body); }
+.match-chronology { margin: 0; padding: 0; list-style: none; color: var(--matchday-ink); }
+.chronology-period { display: flex; align-items: center; justify-content: space-between; margin: 10px 0 4px; padding: 8px 10px; background: var(--matchday-tint); font: 650 12px/1.2 var(--body); font-variant-numeric: tabular-nums; }
+.chronology-period:first-child { margin-top: 0; }
+.chronology-period b { font-weight: 650; }
+.chronology-row { display: flex; align-items: center; gap: 8px; min-height: 40px; padding: 3px 0; border-bottom: 1px solid var(--matchday-line); font: 400 13px/1.35 var(--body); }
+.chronology-row:last-child { border-bottom: 0; }
+.chronology-row.away { flex-direction: row-reverse; text-align: right; }
+.chronology-row.is-grouped { border-top: 0; }
+.chronology-row:has(+ .chronology-row.is-grouped) { border-bottom-color: transparent; }
+.chronology-row time { flex: 0 0 37px; font: 550 12px/1.3 var(--body); font-variant-numeric: tabular-nums; white-space: nowrap; }
+.chronology-row.away time { text-align: right; }
+.chronology-icon { flex: 0 0 20px; display: grid; place-items: center; width: 20px; height: 24px; }
+.chronology-icon svg { display: block; width: 20px; height: 20px; fill: none; stroke: currentColor; stroke-width: 1.65; stroke-linecap: round; stroke-linejoin: round; }
+.chronology-icon .chronology-ball { display: block; width: 20px; height: 20px; max-width: none; object-fit: cover; clip-path: circle(42.8%); transform: scale(1.168); }
+.chronology-content { flex: 0 1 auto; min-width: 0; }
+.chronology-main,.chronology-substitution { display: flex; align-items: center; flex-wrap: wrap; column-gap: 8px; row-gap: 0; }
+.away .chronology-main,.away .chronology-substitution { justify-content: flex-end; }
+.chronology-score { flex: 0 0 auto; min-width: 32px; padding: 3px 6px; border-radius: 3px; background: var(--matchday-navy); color: #fff; text-align: center; font: 650 12px/1.2 var(--body); font-variant-numeric: tabular-nums; }
+.chronology-player { display: inline; max-width: 100%; margin: 0; padding: 6px 0; border: 0; border-radius: 2px; background: transparent; color: var(--matchday-ink); font: 650 13px/1.3 var(--body); text-align: inherit; overflow-wrap: anywhere; text-decoration: none; text-underline-offset: 3px; }
+button.chronology-player { cursor: pointer; touch-action: manipulation; }
+button.chronology-player:hover { color: var(--matchday-blue); text-decoration: underline; }
+.detail-page button.chronology-player:focus-visible { outline: 2px solid var(--matchday-blue); outline-offset: 2px; }
+.chronology-player.is-secondary { color: var(--matchday-muted); font-weight: 400; }
+.chronology-assist { display: inline-flex; align-items: baseline; gap: 3px; color: var(--matchday-muted); font: 400 12px/1.3 var(--body); }
+.chronology-assist .chronology-player { font-size: 12px; }
+.chronology-description,.chronology-note { font: 400 12px/1.35 var(--body); }
+.chronology-note { color: var(--matchday-muted); }
+.chronology-sr { position: absolute; width: 1px; height: 1px; padding: 0; overflow: hidden; clip-path: inset(50%); white-space: nowrap; }
+@media (max-width: 370px) {
+  .chronology-row { gap: 6px; }
+  .chronology-row time { flex-basis: 33px; }
+  .chronology-main,.chronology-substitution { column-gap: 6px; }
+  .chronology-player { font-size: 12px; }
 }
 
 .match-stats-legend {
@@ -350,8 +304,6 @@
   .match-stats-card,
   .season-compare-card,
   .league-compare-card { padding: 12px; }
-  .timeline-event { grid-template-columns: minmax(0, 1fr) 44px minmax(0, 1fr); gap: 6px; }
-  .timeline-event-copy { padding: 8px; }
   .season-duel-values,
   .league-compare-values { grid-template-columns: minmax(36px, 1fr) minmax(0, 1.2fr) minmax(36px, 1fr); gap: 6px; }
   .season-fact-row,

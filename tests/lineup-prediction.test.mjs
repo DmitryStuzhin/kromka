@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { predictFlashscoreLineup } from '../flashscore-adapter.mjs';
+import { mostUsedFormations, predictFlashscoreLineup } from '../flashscore-adapter.mjs';
 
 const player = (id, p, minutes, t = 'zen') => ({
   id, p, t, n: id, lg: [8, minutes], tot: [25, 3000]
@@ -24,4 +24,14 @@ test('forecast adapts to the available positions or returns no incomplete eleven
   const shortAttack = roster.filter(p => p.id !== 'f2');
   assert.equal(predictFlashscoreLineup(shortAttack, 'zen').formation, '4-4-2');
   assert.equal(predictFlashscoreLineup(shortAttack.filter(p => p.p !== 'GK'), 'zen'), null);
+});
+
+test('forecast chooses the most frequent eligible shape, retaining separate midfield lines', () => {
+  const preferences = mostUsedFormations(['4-3-3', '4-2-3-1', '4-4-2', '4-2-3-1', '1-2-3']);
+  assert.deepEqual(preferences, ['4-2-3-1','4-3-3','4-4-2']);
+  const extraMidfielder = player('m4', 'MF', 310);
+  const prediction = predictFlashscoreLineup([...roster, extraMidfielder], 'zen', preferences);
+  assert.equal(prediction.formation, '4-2-3-1');
+  assert.equal(prediction.startingLineups.length, 11);
+  assert.equal(predictFlashscoreLineup(roster, 'zen', preferences).formation, '4-3-3');
 });

@@ -52,7 +52,7 @@ test('daily summary, calendar and followed fixtures serve different purposes', (
   const render = () => runInNewContext('matchesPage()', context);
   const matchIds = (markup=render()) => [...markup.matchAll(/data-match="([^"]+)"/g)].map(row=>row[1]);
   const today = runInNewContext('home()', context);
-  assert.deepEqual(matchIds(today), ['tomorrow','early','late']);
+  assert.deepEqual(matchIds(today), ['early','late']);
   assert.match(today, /data-open-schedule/);
   assert.doesNotMatch(today, /data-week-shift/);
   const favoritesPage = runInNewContext('favoritesPage()', context);
