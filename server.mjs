@@ -2,6 +2,7 @@ import http from 'node:http';
 import './assets/goal-insights.js';
 import { release, releaseIssues } from './release-config.mjs';
 import { legalRoutes, renderLegalPage } from './legal-pages.mjs';
+import { createPushHandler } from './push-http.mjs';
 import { spawn } from 'node:child_process';
 import { createHash } from 'node:crypto';
 import { mkdir, readFile, rename, stat, writeFile } from 'node:fs/promises';
@@ -963,6 +964,7 @@ function rosterMapForFixture(players, fixture) {
   return new Map([...home, ...away]);
 }
 
+const handlePush = createPushHandler();
 const server = http.createServer(async (req, res) => {
   // Packaged Android assets are served by Capacitor at this exact origin.
   if (req.headers.origin === 'https://localhost') {
@@ -979,6 +981,7 @@ const server = http.createServer(async (req, res) => {
   let url;
   try { url = new URL(req.url || '/', 'http://localhost'); }
   catch { return send(res, 400, { error: 'Bad request' }); }
+  if (await handlePush(req, res, url)) return;
   if (!['GET', 'HEAD'].includes(req.method)) return send(res, 405, { error: 'Method not allowed' }, undefined, { Allow: 'GET, HEAD' });
   if (legalRoutes.includes(url.pathname)) return send(res, 200, renderLegalPage(url.pathname, release), 'text/html; charset=utf-8', { 'Cache-Control': 'no-cache' });
   if (url.pathname === '/healthz') return send(res, 200, { status: 'ok', version: release.version });
@@ -1189,6 +1192,7 @@ const server = http.createServer(async (req, res) => {
 });
 startFlashscoreProxy();
 server.on('close', stopFlashscoreProxy);
+server.on('close', () => handlePush.close());
 server.listen(PORT, process.env.HOST || '0.0.0.0', () => {
   console.log(`КРОМКА ${release.version} is running on http://0.0.0.0:${PORT}`);
   console.log(`Flashscore proxy: ${FLASHSCORE_ENABLED ? 'enabled' : 'disabled'}`);

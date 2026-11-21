@@ -221,6 +221,7 @@
   function playerName(player) { return plain(player?.name || player?.lineupPlayer || player?.displayName || 'Игрок'); }
   function playerPhotoUrl(value) {
     const input = String(value || '');
+    if (window.kromkaNative && /^https:\/\/tokenapp\.ru\/api\/player-portraits\/[a-z0-9-]{1,100}\/[a-z0-9]{8}$/i.test(input)) return input;
     return /^\/api\/player-portraits\/[a-z0-9-]{1,100}\/[a-z0-9]{8}$/i.test(input) ? apiUrl(input) : mediaUrl(input);
   }
   window.rplPlayerPhotoUrl = playerPhotoUrl;
@@ -452,6 +453,7 @@
       if (!response.ok) throw new Error(`RPL data source ${response.status}`);
       const payload = await response.json();
       window.kromkaOffline = false;
+      window.kromkaOfflineSavedAt = Date.now();
       applyPayload(payload);
       if (window.kromkaNative) {
         try { localStorage.setItem('kromka:offline-season', JSON.stringify({savedAt:Date.now(),payload})); } catch { /* Storage can be full or unavailable. */ }
@@ -460,6 +462,10 @@
     })();
     refreshPending = request;
     try { return await request; }
+    catch (error) {
+      if (window.kromkaNative && window.isLiveData) { window.kromkaOffline = true; setDataRibbon(true); }
+      throw error;
+    }
     finally { if (refreshPending === request) refreshPending = null; setRefreshBusy(false); }
   }
 

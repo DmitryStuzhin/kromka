@@ -1,10 +1,11 @@
-import { cp, mkdir, readFile, writeFile } from 'node:fs/promises';
+import { cp, mkdir, readFile, rm, writeFile } from 'node:fs/promises';
 import { build } from 'esbuild';
 import { renderLegalPage, legalRoutes } from '../legal-pages.mjs';
 import { releaseConfig } from '../release-config.mjs';
 
 const root = new URL('../', import.meta.url);
 const out = new URL('dist-mobile/', root);
+await rm(out, { recursive: true, force: true });
 await mkdir(out, { recursive: true });
 for (const name of ['assets', 'goal-data.js', 'manifest.json']) await cp(new URL(name, root), new URL(name, out), { recursive: true });
 const nativeLinks = html => html.replace(/href="\/(about|privacy|terms|storage|support|licenses)"/g, 'href="/$1.html"');

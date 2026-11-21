@@ -1,0 +1,27 @@
+[Unit]
+Description=Kromka subscriptions and push delivery worker
+After=network-online.target kromka.service
+Wants=network-online.target
+
+[Service]
+User=kromka
+Group=kromka
+WorkingDirectory=/opt/kromka/current
+EnvironmentFile=/etc/kromka/app.env
+EnvironmentFile=/etc/kromka/push.env
+ExecStart=/opt/kromka-node/bin/node push-worker.mjs
+Restart=on-failure
+RestartSec=10
+TimeoutStopSec=110
+StateDirectory=kromka
+NoNewPrivileges=true
+PrivateTmp=true
+ProtectHome=true
+ProtectSystem=strict
+ReadWritePaths=/var/lib/kromka
+UMask=0077
+MemoryMax=120M
+TasksMax=40
+
+[Install]
+WantedBy=multi-user.target
