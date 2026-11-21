@@ -155,7 +155,7 @@
     const strip = document.querySelector('.prototype-strip');
     if (!strip) return;
     const savedAt = window.kromkaOfflineSavedAt;
-    const text = window.kromkaOffline && savedAt ? `Кромка · Сохранено ${new Date(savedAt).toLocaleString('ru-RU')}` : window.isLiveData ? 'Кромка · РПЛ' : error ? 'Кромка · Демо' : 'Кромка · Загружаем матчи';
+    const text = window.kromkaOffline && savedAt ? `Кромка · Сохранено ${new Date(savedAt).toLocaleString('ru-RU')}` : window.isLiveData ? 'Кромка · РПЛ' : error ? 'Кромка · Демо — данные не загружены' : 'Кромка · Загружаем матчи';
     strip.innerHTML = `<span><i class="dot"></i>${text}</span>`;
   }
   function applyGoalLiveUpdate(update) {
@@ -489,12 +489,12 @@
     window.rplDataProvider = status.provider || 'GOAL API';
     window.rplStandingsProvider = status.standingsProvider || status.provider || 'GOAL API';
     window.rplGoalApiConfigured = Boolean(status.goalApiConfigured);
-    if (!status.configured) return;
+    if (!status.configured) { setDataRibbon(true); return; }
     window.rplSeason = status.season || '2026';
     const seasonLabel = document.getElementById('brand-season');
     if (seasonLabel && /^\d{4}$/.test(String(window.rplSeason))) seasonLabel.textContent = `РПЛ · ${window.rplSeason}/${String(Number(window.rplSeason) + 1).slice(-2)}`;
     return refresh({ quiet: true }).catch((error) => { console.warn('RPL data providers unavailable; retaining explicit demo view', error); setDataRibbon(true); render(); });
-  }).catch(() => setDataRibbon()).finally(() => { if (!refreshPending) setRefreshBusy(false); });
+  }).catch(() => setDataRibbon(true)).finally(() => { if (!refreshPending) setRefreshBusy(false); });
   setInterval(() => { if (window.isLiveData && document.visibilityState === 'visible') refresh({ quiet: true }).catch(() => console.warn('Не удалось обновить данные матчей')); }, 30 * 1000);
   if (!window.kromkaNative && 'serviceWorker' in navigator) navigator.serviceWorker.register('/service-worker.js').catch((e) => console.warn('PWA worker unavailable', e));
 })();
