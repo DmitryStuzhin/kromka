@@ -77,7 +77,13 @@ export class PushStore {
       return subscriptions;
     });
   }
-  remove(id, secret) { this.authorize(id, secret); this.db.prepare('DELETE FROM devices WHERE id=?').run(id); }
+  remove(id, secret) {
+    // A lost successful response must not turn a retried revocation into failure.
+    // An existing installation still requires its original secret.
+    if (!this.db.prepare('SELECT id FROM devices WHERE id=?').get(id)) return;
+    this.authorize(id, secret);
+    this.db.prepare('DELETE FROM devices WHERE id=?').run(id);
+  }
   preferences(id, secret) { return JSON.parse(this.authorize(id, secret).prefs); }
   subscribers() { return this.db.prepare('SELECT id,prefs FROM devices').all().map(row => ({ id: row.id, ...JSON.parse(row.prefs) })); }
   matches(prefs, fixture, kind) { return prefs.kinds.includes(kind) && (prefs.fixtureIds.includes(fixture.id) || prefs.teamIds.includes(fixture.homeTeamId) || prefs.teamIds.includes(fixture.awayTeamId)); }

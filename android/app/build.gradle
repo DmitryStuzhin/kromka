@@ -1,5 +1,7 @@
 apply plugin: 'com.android.application'
 
+def pushProject = providers.gradleProperty('rustoreProjectId').orElse(providers.environmentVariable('RUSTORE_PROJECT_ID')).getOrElse('')
+if (pushProject && !(pushProject ==~ /[A-Za-z0-9_-]{3,160}/)) throw new GradleException('Invalid RuStore project ID')
 android {
     namespace = "ru.tokenapp.kromka"
     compileSdk = rootProject.ext.compileSdkVersion
@@ -9,6 +11,7 @@ android {
         targetSdkVersion rootProject.ext.targetSdkVersion
         versionCode 1
         versionName "0.2.0"
+        buildConfigField 'String', 'RUSTORE_PROJECT_ID', '"' + pushProject + '"'
         testInstrumentationRunner "androidx.test.runner.AndroidJUnitRunner"
         testInstrumentationRunnerArguments additionalTestOutputDir: "/sdcard/Android/media/ru.tokenapp.kromka/smoke-output"
         aaptOptions {
@@ -17,6 +20,7 @@ android {
             ignoreAssetsPattern = '!.svn:!.git:!.ds_store:!*.scc:.*:!CVS:!thumbs.db:!picasa.ini:!*~'
         }
     }
+    buildFeatures { buildConfig true }
     buildTypes {
         release {
             minifyEnabled false
@@ -32,6 +36,8 @@ repositories {
 }
 
 dependencies {
+    implementation 'ru.rustore.sdk:pushclient:7.6.0'
+    implementation 'androidx.work:work-runtime:2.12.0'
     implementation fileTree(include: ['*.jar'], dir: 'libs')
     implementation "androidx.appcompat:appcompat:$androidxAppCompatVersion"
     implementation "androidx.coordinatorlayout:coordinatorlayout:$androidxCoordinatorLayoutVersion"

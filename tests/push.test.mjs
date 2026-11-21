@@ -26,6 +26,8 @@ test('push credentials protect updates, reads, deletion and token ownership', ()
     assert.throws(() => store.register(b.id, b.secret, { ...input, consent: false }, now), { status: 400 });
     assert.equal(store.preferences(a.id, a.secret).consent, PUSH_CONSENT);
     store.remove(a.id, a.secret); assert.equal(store.counts().devices, 0);
+    assert.doesNotThrow(() => store.remove(a.id, a.secret)); // retry after a lost response
+    assert.doesNotThrow(() => store.remove(b.id, b.secret)); // opt-out before registration completed
   } finally { store.close(); }
 });
 
@@ -103,7 +105,8 @@ test('RuStore transport uses documented HTTPS body, retry policy and removes rej
       assert.equal(url, 'https://vkpns.rustore.ru/v1/projects/test-project/messages:send');
       assert.equal(options.headers.Authorization, 'Bearer secret');
       const body = JSON.parse(options.body).message;
-      assert.equal(body.token, input.token); assert.equal(body.android.notification.channel_id, 'matches');
+      assert.equal(body.token, input.token); assert.equal(body.notification, undefined);
+      assert.equal(body.data.title, job.payload.title); assert.equal(body.data.body, job.payload.body);
       assert.equal(typeof body.data.eventId, 'string'); assert.match(body.android.ttl, /s$/);
       return new Response('{}', { status: 200 });
     }), 'sent');

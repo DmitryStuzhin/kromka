@@ -1,7 +1,8 @@
 <?xml version="1.0" encoding="utf-8"?>
-<manifest xmlns:android="http://schemas.android.com/apk/res/android">
+<manifest xmlns:android="http://schemas.android.com/apk/res/android" xmlns:tools="http://schemas.android.com/tools">
 
     <application
+        android:name=".KromkaApplication"
         android:allowBackup="false"
         android:usesCleartextTraffic="false"
         android:icon="@mipmap/ic_launcher"
@@ -24,6 +25,13 @@
             </intent-filter>
 
         </activity>
+
+        <!-- Manual initialization after consent; never initialize from a provider. -->
+        <provider android:name="ru.rustore.sdk.pushclient.provider.RuStorePushClientInitProvider" tools:node="remove" />
+        <receiver android:name="ru.rustore.sdk.pushclient.internal.arbiter.ArbiterBroadcastReceiver" android:enabled="false" tools:replace="android:enabled" />
+        <service android:name=".KromkaMessagingService" android:enabled="false" android:exported="true">
+            <intent-filter><action android:name="ru.rustore.sdk.pushclient.MESSAGING_EVENT" /></intent-filter>
+        </service>
 
         <provider
             android:name="androidx.core.content.FileProvider"
