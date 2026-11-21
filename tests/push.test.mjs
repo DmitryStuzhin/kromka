@@ -147,4 +147,5 @@ test('push HTTP rejects foreign origins, unauthorized modifications and supports
   settings.registration = false;
   assert.equal((await fetch(url, options)).status, 503);
   assert.equal((await fetch(url, { method: 'DELETE', headers: options.headers })).status, 200);
+  assert.equal((await fetch(url, { method: 'DELETE', headers: options.headers })).status, 200); // a lost reply is safe to retry
 });

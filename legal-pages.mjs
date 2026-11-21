@@ -14,7 +14,7 @@ const day = value => new Intl.DateTimeFormat('ru-RU', { day: 'numeric', month: '
 const nav = current => `<nav class="legal-nav" aria-label="Документы и поддержка">${Object.entries(sections).map(([path,title])=>`<a href="${path}"${path===current?' aria-current="page"':''}>${title}</a>`).join('')}</nav>`;
 
 function hosting(config) {
-  if (!config.hostingProvider || !config.hostingLocation || !config.hostingCountry) return '<p>Для публичного выпуска планируется размещение в России. Провайдер и дата-центр ещё не выбраны. Эти сведения будут опубликованы здесь до запуска.</p>';
+  if (!config.hostingProvider || !config.hostingLocation || !config.hostingCountry) return `<p>${config.publicUrl ? `Приложение доступно по адресу <a href="${escape(config.publicUrl)}">${escape(config.publicUrl)}</a>.` : 'Для публичного выпуска планируется размещение в России.'} Сведения о провайдере и дата-центре ещё не подтверждены в этой редакции. Они будут заполнены до публичного выпуска.</p>`;
   return `<dl class="legal-details"><div><dt>Провайдер</dt><dd>${escape(config.hostingProvider)}</dd></div><div><dt>Размещение</dt><dd>${escape(config.hostingLocation)}, ${escape(config.hostingCountry==='RU'?'Россия':config.hostingCountry)}</dd></div><div><dt>Технические журналы</dt><dd>${config.logRetentionDays ? `До ${config.logRetentionDays} дней` : 'Срок уточняется до публичного запуска'}</dd></div></dl>`;
 }
 

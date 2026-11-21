@@ -11,7 +11,7 @@ export function releaseConfig(env = process.env) {
     if (url.protocol === 'https:' && !url.username && !url.password && url.pathname === '/' && !url.search && !url.hash) publicUrl = url.origin;
   } catch { /* A public domain is deliberately not guessed from a request header. */ }
   return {
-    name: 'КРОМКА', version: packageInfo.version, revision: '1.0', updated: '2026-11-21',
+    name: 'КРОМКА', version: packageInfo.version, revision: '1.1', updated: '2026-11-21',
     owners: ['Стужин Дмитрий Юрьевич', 'Явников Федор Андреевич'],
     operatorCountry: 'Россия', email: 'stuzzhin@mail.ru',
     postalAddress: text(env.LEGAL_POSTAL_ADDRESS),
