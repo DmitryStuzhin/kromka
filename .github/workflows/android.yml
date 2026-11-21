@@ -9,6 +9,7 @@ permissions:
 jobs:
   apk:
     runs-on: ubuntu-latest
+    timeout-minutes: 20
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-node@v4
@@ -32,4 +33,30 @@ jobs:
         with:
           name: kromka-debug-apk
           path: android/app/build/outputs/apk/debug/app-debug.apk
+          retention-days: 14
+      - name: Enable emulator acceleration
+        run: |
+          echo 'KERNEL=="kvm", GROUP="kvm", MODE="0666", OPTIONS+="static_node=kvm"' | sudo tee /etc/udev/rules.d/99-kvm4all.rules
+          sudo udevadm control --reload-rules
+          sudo udevadm trigger --name-match=kvm
+      - name: Verify installed APK on Android 15
+        uses: reactivecircus/android-emulator-runner@v2
+        with:
+          api-level: 35
+          arch: x86_64
+          target: google_apis
+          profile: pixel_7
+          disable-animations: true
+          script: |
+            cd android && ./gradlew connectedDebugAndroidTest --no-daemon
+            adb pull /sdcard/Android/data/ru.tokenapp.kromka/files/ android/app/build/reports/smoke-screenshots/
+      - name: Save device test reports
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: kromka-android-test-reports
+          path: |
+            android/app/build/reports/androidTests/
+            android/app/build/outputs/androidTest-results/
+            android/app/build/reports/smoke-screenshots/
           retention-days: 14
