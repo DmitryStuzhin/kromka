@@ -20,7 +20,7 @@ const receiveLink = value => {
     if(url.protocol !== 'ru.tokenapp.kromka:' || url.hostname !== 'match' || !/^\/[A-Za-z0-9_-]{1,64}$/.test(url.pathname) || url.search || url.hash) return;
     pendingMatch = url.pathname.slice(1); sessionStorage.setItem('kromka:push-match', pendingMatch);
     if(location.pathname !== '/' && location.pathname !== '/index.html') location.href='/'; else openPending();
-  } catch {}
+  } catch (error) { console.warn('Не удалось открыть матч из уведомления', error?.message); }
 };
 pendingMatch = sessionStorage.getItem('kromka:push-match');
 App.getLaunchUrl().then(result=>{if(result?.url) receiveLink(result.url);}).catch(()=>{});

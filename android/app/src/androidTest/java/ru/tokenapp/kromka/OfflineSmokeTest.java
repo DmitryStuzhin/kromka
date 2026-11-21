@@ -31,7 +31,8 @@ public class OfflineSmokeTest {
             if ("true".equals(js("Boolean(" + condition + ")"))) return;
             SystemClock.sleep(100);
         }
-        fail("Condition was not met: " + condition + "; page=" + js("document.body.innerText.slice(0,400)"));
+        fail("Condition was not met: " + condition + "; page=" + js("document.body.innerText.slice(0,400)")
+            + "; navigation=" + js("JSON.stringify({url:location.href,pending:sessionStorage.getItem('kromka:push-match'),live:window.isLiveData,layer:window.openMatch?.__detailedMatchLayer})"));
     }
     private void screenshot(String filename) throws Exception {
         InstrumentationRegistry.getInstrumentation().waitForIdleSync();
@@ -69,6 +70,9 @@ public class OfflineSmokeTest {
             until("document.querySelector('#screen').innerText.includes('Зенит') && document.querySelector('#screen').innerText.includes('31')");
             screenshot("smoke-saved-table.png");
             assertEquals("false", js("window.kromkaOpenPushMatch('unknown-match')"));
+            assertEquals("true", js("window.kromkaOpenPushMatch('smoke1')"));
+            until("document.querySelector('#screen [data-detail-back]') !== null");
+            androidx.test.espresso.Espresso.pressBack();
             InstrumentationRegistry.getInstrumentation().runOnMainSync(() -> activity.startActivity(
                 new android.content.Intent(activity, MainActivity.class).setAction(android.content.Intent.ACTION_VIEW)
                     .setData(android.net.Uri.parse("ru.tokenapp.kromka://match/smoke1"))
