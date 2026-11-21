@@ -67,7 +67,7 @@ public class OfflineSmokeTest {
             screenshot("smoke-saved-table.png");
 
             js("location.href='/privacy.html'");
-            until("document.querySelector('h1')?.innerText.includes('конфиденциальности')");
+            until("document.querySelector('h1')?.innerText.toLowerCase().includes('конфиденциальност')");
             assertEquals("true", js("document.querySelector('a[href=\"/storage.html\"]') !== null"));
             screenshot("smoke-privacy.png");
             androidx.test.espresso.Espresso.pressBack();

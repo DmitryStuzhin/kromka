@@ -3,7 +3,7 @@ on:
   workflow_dispatch:
   push:
     branches: [main]
-    paths: ['android/**', 'mobile/**', 'assets/**', 'scripts/build-mobile.mjs', 'capacitor.config.json', 'index.html', 'goal-data.js', 'legal-pages.mjs', 'release-config.mjs', 'package*.json', '.github/workflows/android.yml']
+    paths: ['android/**', 'mobile/**', 'assets/**', 'scripts/build-mobile.mjs', 'scripts/android-smoke.sh', 'capacitor.config.json', 'index.html', 'goal-data.js', 'legal-pages.mjs', 'release-config.mjs', 'package*.json', '.github/workflows/android.yml']
 permissions:
   contents: read
 jobs:
@@ -47,9 +47,7 @@ jobs:
           target: google_apis
           profile: pixel_7
           disable-animations: true
-          script: |
-            ./android/gradlew -p android connectedDebugAndroidTest --no-daemon
-            adb pull /sdcard/Android/data/ru.tokenapp.kromka/files/ android/app/build/reports/smoke-screenshots/
+          script: bash scripts/android-smoke.sh
       - name: Save device test reports
         if: always()
         uses: actions/upload-artifact@v4
