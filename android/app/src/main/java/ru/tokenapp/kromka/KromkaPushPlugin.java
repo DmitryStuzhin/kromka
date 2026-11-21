@@ -64,7 +64,9 @@ public class KromkaPushPlugin extends Plugin {
         PushSyncWorker.resume(getContext()); resolve(call);
     }
     @PluginMethod public void openSettings(PluginCall call) {
-        Intent intent = new Intent(Settings.ACTION_APP_NOTIFICATION_SETTINGS).putExtra(Settings.EXTRA_APP_PACKAGE, getContext().getPackageName());
+        Intent intent = Build.VERSION.SDK_INT>=26
+            ? new Intent(Settings.ACTION_APP_NOTIFICATION_SETTINGS).putExtra(Settings.EXTRA_APP_PACKAGE, getContext().getPackageName())
+            : new Intent(Settings.ACTION_APPLICATION_DETAILS_SETTINGS, android.net.Uri.parse("package:"+getContext().getPackageName()));
         getActivity().startActivity(intent); call.resolve();
     }
     @Override protected void handleOnDestroy() { network.shutdownNow(); }

@@ -14,6 +14,32 @@ import ru.rustore.sdk.pushclient.RuStorePushClient;
 
 @RunWith(AndroidJUnit4.class)
 public class PushStateTest {
+    @Test public void networkRetryAndLateRegistrationCannotUndoRevocation() throws Exception {
+        Context context = InstrumentationRegistry.getInstrumentation().getTargetContext();
+        PushState state = new PushState(context); state.prefs.edit().clear().commit();
+        try {
+            state.enable(new JSONArray("[\"m1\"]"), new JSONArray(), new JSONArray("[\"goal\"]"));
+            state.token("device-token-for-worker-123456");
+            assertEquals(androidx.work.ListenableWorker.Result.retry(), PushSyncWorker.sync(state, (id,secret,enabled,body)->503, ()->false));
+            assertTrue(new PushState(context).prefs.getBoolean("pending", false));
+            assertEquals(androidx.work.ListenableWorker.Result.retry(), PushSyncWorker.sync(new PushState(context), (id,secret,enabled,body)->{throw new java.io.IOException("offline");}, ()->false));
+            assertEquals(androidx.work.ListenableWorker.Result.success(), PushSyncWorker.sync(new PushState(context), (id,secret,enabled,body)->{
+                assertTrue(enabled); assertTrue(secret.matches("[A-Za-z0-9_-]{43}"));
+                assertEquals("device-token-for-worker-123456", new org.json.JSONObject(body).getString("token"));
+                state.disable(); // user acts while this PUT is in flight
+                return 200;
+            }, ()->false));
+            assertFalse(state.enabled()); assertTrue(state.prefs.getBoolean("pending", false));
+            assertEquals("revoking", state.prefs.getString("status", ""));
+            assertTrue(state.prefs.contains("id"));
+            assertEquals(androidx.work.ListenableWorker.Result.success(), PushSyncWorker.sync(new PushState(context), (id,secret,enabled,body)->{
+                assertFalse(enabled); assertTrue(secret.matches("[A-Za-z0-9_-]{43}")); return 200;
+            }, ()->false));
+            assertFalse(state.prefs.getBoolean("pending", true));
+            assertFalse(state.prefs.contains("id")); assertFalse(state.prefs.contains("secret"));
+            assertEquals("off", state.prefs.getString("status", ""));
+        } finally { state.prefs.edit().clear().commit(); }
+    }
     @Test public void privateCredentialsRotationDedupAndImmediateOfflineOptOut() throws Exception {
         Context context = InstrumentationRegistry.getInstrumentation().getTargetContext();
         PushState state = new PushState(context);

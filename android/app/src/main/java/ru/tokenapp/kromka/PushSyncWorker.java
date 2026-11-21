@@ -40,12 +40,25 @@ public final class PushSyncWorker extends Worker {
             return result.optBoolean("available") && PushState.CONSENT.equals(result.optString("consent"));
         } catch (Exception e) { return false; } finally { if(c!=null)c.disconnect(); }
     }
-    @Override public Result doWork() {
+    interface Transport { int send(String id, String secret, boolean enabled, String body) throws Exception; }
+    static int upload(String id, String secret, boolean enabled, String body) throws Exception {
+        HttpURLConnection c = connection(API+"devices/"+id, enabled ? "PUT" : "DELETE");
+        try {
+            c.setRequestProperty("Authorization", "Bearer "+secret);
+            if(enabled) {
+                byte[] bytes = body.getBytes(StandardCharsets.UTF_8);
+                c.setRequestProperty("Content-Type", "application/json"); c.setDoOutput(true); c.setFixedLengthStreamingMode(bytes.length);
+                try(java.io.OutputStream out = c.getOutputStream()) { out.write(bytes); }
+            }
+            return c.getResponseCode();
+        } finally { c.disconnect(); }
+    }
+    @Override public Result doWork() { return sync(new PushState(getApplicationContext()), PushSyncWorker::upload, this::isStopped); }
+    static Result sync(PushState state, Transport transport, java.util.function.BooleanSupplier stopped) {
         // Cancellation cannot interrupt every HTTP call. Serialize actual requests so a
         // cancelled PUT always finishes before the replacement DELETE/new settings.
         synchronized (NETWORK_LOCK) {
-            if (isStopped()) return Result.success();
-            PushState state = new PushState(getApplicationContext());
+            if (stopped.getAsBoolean()) return Result.success();
             long generation; boolean enabled; String id, secret, body;
             try {
                 synchronized (PushState.LOCK) {
@@ -60,17 +73,7 @@ public final class PushSyncWorker extends Worker {
                         .put("kinds", PushState.array(state.prefs.getString("kinds", PushState.DEFAULT_KINDS)));
                     body = payload.toString();
                 }
-                HttpURLConnection c = connection(API+"devices/"+id, enabled ? "PUT" : "DELETE");
-                int code;
-                try {
-                    c.setRequestProperty("Authorization", "Bearer "+secret);
-                    if(enabled) {
-                        byte[] bytes = body.getBytes(StandardCharsets.UTF_8);
-                        c.setRequestProperty("Content-Type", "application/json"); c.setDoOutput(true); c.setFixedLengthStreamingMode(bytes.length);
-                        try(java.io.OutputStream out = c.getOutputStream()) { out.write(bytes); }
-                    }
-                    code = c.getResponseCode();
-                } finally { c.disconnect(); }
+                int code = transport.send(id, secret, enabled, body);
                 synchronized (PushState.LOCK) {
                     if (generation != state.prefs.getLong("generation", 0)) return Result.success();
                     if (code>=200 && code<300) {
