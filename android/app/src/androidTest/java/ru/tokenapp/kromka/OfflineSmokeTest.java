@@ -37,7 +37,10 @@ public class OfflineSmokeTest {
         InstrumentationRegistry.getInstrumentation().waitForIdleSync();
         Bitmap bitmap = InstrumentationRegistry.getInstrumentation().getUiAutomation().takeScreenshot();
         assertNotNull(bitmap);
-        try (FileOutputStream out = new FileOutputStream(new File(activity.getExternalFilesDir(null), filename))) {
+        String output = InstrumentationRegistry.getArguments().getString("additionalTestOutputDir", activity.getExternalFilesDir(null).getAbsolutePath());
+        File directory = new File(output);
+        assertTrue(directory.isDirectory() || directory.mkdirs());
+        try (FileOutputStream out = new FileOutputStream(new File(directory, filename))) {
             bitmap.compress(Bitmap.CompressFormat.PNG, 100, out);
         }
     }
