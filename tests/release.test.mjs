@@ -54,6 +54,10 @@ async function startServer(t, env={}) {
 
 test('legal routes, font licenses, private files, HEAD and security headers work without a sports provider',async t=>{
   const base=await startServer(t);
+  const native=await fetch(base+'/healthz',{headers:{Origin:'https://localhost'}});
+  assert.equal(native.headers.get('access-control-allow-origin'),'https://localhost');
+  const untrusted=await fetch(base+'/healthz',{headers:{Origin:'https://untrusted.example'}});
+  assert.equal(untrusted.headers.get('access-control-allow-origin'),null);
   for(const path of legalRoutes){
     const response=await fetch(base+path);
     assert.equal(response.status,200);

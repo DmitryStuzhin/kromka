@@ -1,4 +1,6 @@
 (() => {
+  const apiUrl = value => window.kromkaApiUrl ? window.kromkaApiUrl(value) : value;
+  const apiFetch = (url, options) => fetch(apiUrl(url), options);
   const safe = (v) => String(v ?? '').replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
   const plain = (v) => String(v ?? '').replace(/<[^>]*>/g, '').trim();
   const num = (v, fallback = 0) => { const n = Number(String(v ?? '').replace(/[^\d.+-]/g, '')); return Number.isFinite(n) ? n : fallback; };
@@ -152,7 +154,8 @@
   function setDataRibbon(error = false) {
     const strip = document.querySelector('.prototype-strip');
     if (!strip) return;
-    const text = window.isLiveData ? 'Кромка · РПЛ' : error ? 'Кромка · Демо' : 'Кромка · Загружаем матчи';
+    const savedAt = window.kromkaOfflineSavedAt;
+    const text = window.kromkaOffline && savedAt ? `Кромка · Сохранено ${new Date(savedAt).toLocaleString('ru-RU')}` : window.isLiveData ? 'Кромка · РПЛ' : error ? 'Кромка · Демо' : 'Кромка · Загружаем матчи';
     strip.innerHTML = `<span><i class="dot"></i>${text}</span>`;
   }
   function applyGoalLiveUpdate(update) {
@@ -189,7 +192,7 @@
   }
   function startLiveStream() {
     if (liveEventSource || typeof EventSource === 'undefined') return;
-    liveEventSource = new EventSource('/api/live-stream');
+    liveEventSource = new EventSource(apiUrl('/api/live-stream'));
     liveEventSource.addEventListener('state', (event) => {
       try { const state = JSON.parse(event.data); window.goalLiveStreamState = state.state || 'idle'; window.goalLiveStreamProvider = state.provider || 'GOAL API'; }
       catch { window.goalLiveStreamState = 'reconnecting'; }
@@ -218,7 +221,7 @@
   function playerName(player) { return plain(player?.name || player?.lineupPlayer || player?.displayName || 'Игрок'); }
   function playerPhotoUrl(value) {
     const input = String(value || '');
-    return /^\/api\/player-portraits\/[a-z0-9-]{1,100}\/[a-z0-9]{8}$/i.test(input) ? input : mediaUrl(input);
+    return /^\/api\/player-portraits\/[a-z0-9-]{1,100}\/[a-z0-9]{8}$/i.test(input) ? apiUrl(input) : mediaUrl(input);
   }
   window.rplPlayerPhotoUrl = playerPhotoUrl;
   function playerPhoto(player) {
@@ -262,7 +265,7 @@
     root.setAttribute('aria-busy', 'true');
     root.innerHTML = loadingMarkup('Загружаем состав…', 3);
     try {
-      const response = await fetch(`/api/teams/${encodeURIComponent(teamId)}/players`, { cache: 'no-store' });
+      const response = await apiFetch(`/api/teams/${encodeURIComponent(teamId)}/players`, { cache: 'no-store' });
       if (!response.ok) throw new Error(`Roster HTTP ${response.status}`);
       const payload = await response.json(); const rows = Array.isArray(payload.data) ? payload.data : findArray(payload, ['players', 'items', 'data']);
       const meta = { ...(payload.portraitFallback || {}), provider: payload.provider || 'GOAL API', supplementalProvider: payload.supplementalProvider || '' };
@@ -328,7 +331,7 @@
     root.setAttribute('aria-busy', 'true');
     root.innerHTML = loadingMarkup('Загружаем составы…', 4);
     try {
-      const response = await fetch(`/api/fixtures/${encodeURIComponent(match.id)}/lineups`, { cache: 'no-store' });
+      const response = await apiFetch(`/api/fixtures/${encodeURIComponent(match.id)}/lineups`, { cache: 'no-store' });
       if (!response.ok) throw new Error(`Lineups HTTP ${response.status}`);
       const payload = await response.json(); lineupCache.set(match.id, { at: Date.now(), status, payload });
       const current = document.getElementById('matchLineups'); if (current && modalMatch?.id === match.id) { current.setAttribute('aria-busy', 'false'); current.innerHTML = lineupsMarkup(payload, modalMatch); }
@@ -366,7 +369,7 @@
       const result = { at: Date.now(), events: null, statistics: null };
       await Promise.all(resources.map(async (resource) => {
         try {
-          const response = await fetch(`/api/fixtures/${encodeURIComponent(id)}/${resource}`, { cache: 'no-store' });
+          const response = await apiFetch(`/api/fixtures/${encodeURIComponent(id)}/${resource}`, { cache: 'no-store' });
           if (!response.ok) throw new Error(`HTTP ${response.status}`);
           const payload = await response.json();
           result[resource] = { ok: true, provider: payload.provider || 'GOAL API', rows: resource === 'events' ? normalizeEventsPayload(payload) : normalizeStatsPayload(payload), ...(resource === 'events' ? { records: window.rplMatchInsights.eventRecords(payload) } : {}) };
@@ -445,9 +448,15 @@
     if (refreshPending) return refreshPending;
     setRefreshBusy(true);
     const request = (async () => {
-      const response = await fetch(`/api/rpl?season=${encodeURIComponent(window.rplSeason || '2026')}&_=${Date.now()}`, { cache: 'no-store' });
+      const response = await apiFetch(`/api/rpl?season=${encodeURIComponent(window.rplSeason || '2026')}&_=${Date.now()}`, { cache: 'no-store' });
       if (!response.ok) throw new Error(`RPL data source ${response.status}`);
-      applyPayload(await response.json()); if (!quiet) showToast('Данные обновлены');
+      const payload = await response.json();
+      window.kromkaOffline = false;
+      applyPayload(payload);
+      if (window.kromkaNative) {
+        try { localStorage.setItem('kromka:offline-season', JSON.stringify({savedAt:Date.now(),payload})); } catch { /* Storage can be full or unavailable. */ }
+      }
+      if (!quiet) showToast('Данные обновлены');
     })();
     refreshPending = request;
     try { return await request; }
@@ -457,10 +466,20 @@
   window.isLiveData = false; window.goalLiveStreamState = 'idle'; window.apiRound = 13; window.rplSeason = '2026';
   window.rplClubKeyForName = (name) => keyFor(name, '');
   window.rplDataProvider = 'Flashscore'; window.rplStandingsProvider = 'Flashscore'; window.rplGoalApiConfigured = false;
+  if (window.kromkaNative) {
+    try {
+      const saved = JSON.parse(localStorage.getItem('kromka:offline-season') || 'null');
+      if (saved?.payload && Number.isFinite(saved.savedAt)) {
+        window.kromkaOfflineSavedAt = saved.savedAt;
+        window.kromkaOffline = true;
+        applyPayload(saved.payload);
+      }
+    } catch { /* Invalid cache must not prevent startup. */ }
+  }
   setDataRibbon();
   setRefreshBusy(true);
   window.refreshGoalData = () => refresh().catch(() => showToast(window.isLiveData ? 'Не удалось обновить данные' : 'Источники данных недоступны; показано демо'));
-  fetch('/api/status', { cache: 'no-store' }).then((r) => r.ok ? r.json() : ({ configured: false })).then((status) => {
+  apiFetch('/api/status', { cache: 'no-store' }).then((r) => r.ok ? r.json() : ({ configured: false })).then((status) => {
     window.rplDataProvider = status.provider || 'GOAL API';
     window.rplStandingsProvider = status.standingsProvider || status.provider || 'GOAL API';
     window.rplGoalApiConfigured = Boolean(status.goalApiConfigured);
@@ -471,5 +490,5 @@
     return refresh({ quiet: true }).catch((error) => { console.warn('RPL data providers unavailable; retaining explicit demo view', error); setDataRibbon(true); render(); });
   }).catch(() => setDataRibbon()).finally(() => { if (!refreshPending) setRefreshBusy(false); });
   setInterval(() => { if (window.isLiveData && document.visibilityState === 'visible') refresh({ quiet: true }).catch(() => console.warn('Не удалось обновить данные матчей')); }, 30 * 1000);
-  if ('serviceWorker' in navigator) navigator.serviceWorker.register('/service-worker.js').catch((e) => console.warn('PWA worker unavailable', e));
+  if (!window.kromkaNative && 'serviceWorker' in navigator) navigator.serviceWorker.register('/service-worker.js').catch((e) => console.warn('PWA worker unavailable', e));
 })();

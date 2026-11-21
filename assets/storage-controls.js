@@ -26,6 +26,7 @@
           for (const key of preferenceKeys) localStorage.removeItem(key);
           status.textContent = 'Избранное и любимый клуб удалены из этого браузера. Обновите другие открытые вкладки КРОМКИ.';
         } else {
+          localStorage.removeItem('kromka:offline-season');
           if (!('caches' in window)) throw new Error('Cache API unavailable');
           const keys = (await caches.keys()).filter(key => key.startsWith('temp-rpl-shell-'));
           await Promise.all(keys.map(key => caches.delete(key)));

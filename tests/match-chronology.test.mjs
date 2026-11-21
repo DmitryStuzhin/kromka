@@ -84,7 +84,7 @@ test('received events remain available after a fixture refresh while statistics 
     window:{rplMatchInsights:globalThis.rplMatchInsights,refreshDetailedMatch:()=>{}},
     normalizeEventsPayload:globalThis.rplMatchInsights.normalizeEventsPayload,
     normalizeStatsPayload:globalThis.rplMatchInsights.normalizeStatsPayload,
-    fetch:async url=>url.endsWith('/events')?{ok:true,json:async()=>({events:details})}:statistics
+    apiFetch:async url=>url.endsWith('/events')?{ok:true,json:async()=>({events:details})}:statistics
   };
   runInNewContext(source.slice(start,end),context);
   const first={id:'match',status:'finished',events:[],stats:[]};

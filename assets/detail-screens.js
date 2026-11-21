@@ -235,7 +235,8 @@
     route.profileState = 'loading';
     if (detailRoute === route) renderRoute();
     try {
-      const response = await fetch(`/api/teams/${encodeURIComponent(teamId)}/player?${query}`);
+      const endpoint = `/api/teams/${encodeURIComponent(teamId)}/player?${query}`;
+      const response = await fetch(window.kromkaApiUrl ? window.kromkaApiUrl(endpoint) : endpoint);
       if (response.status === 404) route.profileState = 'missing';
       else if (!response.ok) throw new Error('Profile request failed');
       else {

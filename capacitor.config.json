@@ -1,0 +1,7 @@
+{
+  "appId": "ru.tokenapp.kromka",
+  "appName": "КРОМКА",
+  "webDir": "dist-mobile",
+  "server": { "androidScheme": "https", "cleartext": false },
+  "android": { "allowMixedContent": false, "webContentsDebuggingEnabled": false }
+}

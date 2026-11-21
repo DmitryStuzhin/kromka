@@ -64,7 +64,7 @@ test('PWA accepts only known GOAL fixture updates and retains REST polling', asy
   const server = await readFile(serverScript, 'utf8');
   const html = await readFile(path.join(projectRoot, 'index.html'), 'utf8');
   const worker = await readFile(path.join(projectRoot, 'service-worker.js'), 'utf8');
-  assert.ok(client.includes("new EventSource('/api/live-stream')"));
+  assert.ok(client.includes("new EventSource(apiUrl('/api/live-stream'))"));
   assert.ok(client.includes("update.provider !== 'GOAL API'"));
   assert.ok(client.includes('matches.find((entry) => String(entry.id) === String(update.fixtureId))'));
   assert.ok(server.includes("fixture.provider === 'Flashscore' && fixture.goalFixtureId === id"));

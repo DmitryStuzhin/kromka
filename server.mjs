@@ -964,6 +964,11 @@ function rosterMapForFixture(players, fixture) {
 }
 
 const server = http.createServer(async (req, res) => {
+  // Packaged Android assets are served by Capacitor at this exact origin.
+  if (req.headers.origin === 'https://localhost') {
+    res.setHeader('Access-Control-Allow-Origin', 'https://localhost');
+    res.setHeader('Vary', 'Origin');
+  }
   res.setHeader('X-Content-Type-Options', 'nosniff');
   res.setHeader('Referrer-Policy', 'no-referrer');
   res.setHeader('X-Frame-Options', 'DENY');
