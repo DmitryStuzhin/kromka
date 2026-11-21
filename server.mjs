@@ -1,5 +1,7 @@
 import http from 'node:http';
 import './assets/goal-insights.js';
+import { release, releaseIssues } from './release-config.mjs';
+import { legalRoutes, renderLegalPage } from './legal-pages.mjs';
 import { spawn } from 'node:child_process';
 import { createHash } from 'node:crypto';
 import { mkdir, readFile, rename, stat, writeFile } from 'node:fs/promises';
@@ -21,7 +23,7 @@ const FLASHSCORE_PROXY_PORT = Number(new URL(FLASHSCORE_PROXY_URL).port || 8765)
 const SQUAD_CACHE_TTL = 7 * 24 * 60 * 60_000;
 const PORTRAIT_CHECK_TTL = 7 * 24 * 60 * 60_000;
 const API_FOOTBALL_DAILY_GUARD = 80;
-const API_FOOTBALL_CACHE_PATH = path.join(ROOT, '.cache', 'api-football-squads.json');
+const API_FOOTBALL_CACHE_PATH = path.join(process.env.KROMKA_CACHE_DIR || path.join(ROOT, '.cache'), 'api-football-squads.json');
 const API_FOOTBALL_GENERIC_PHOTO_HASHES = new Set([
   // Verified generic gray silhouette returned for two distinct Dynamo squad player URLs.
   '2ff7d52a628fce5d954c58480dde4e47396db4bb405b7b7d6a6567134bf86422'
@@ -69,7 +71,7 @@ let goalLiveGeneration = 0;
 let goalLiveRetryTimer = null;
 let goalLiveRetryAttempt = 0;
 let goalLiveState = { provider: 'GOAL API', transport: 'WebSocket', state: 'idle', matchCount: 0, updatedAt: null };
-const MIME = { '.html':'text/html; charset=utf-8','.css':'text/css; charset=utf-8','.js':'text/javascript; charset=utf-8','.json':'application/json; charset=utf-8','.svg':'image/svg+xml','.png':'image/png','.jpg':'image/jpeg','.jpeg':'image/jpeg','.webmanifest':'application/manifest+json' };
+const MIME = { '.html':'text/html; charset=utf-8','.css':'text/css; charset=utf-8','.js':'text/javascript; charset=utf-8','.json':'application/json; charset=utf-8','.svg':'image/svg+xml','.png':'image/png','.jpg':'image/jpeg','.jpeg':'image/jpeg','.webmanifest':'application/manifest+json','.woff2':'font/woff2','.woff':'font/woff','.ttf':'font/ttf','.otf':'font/otf','.txt':'text/plain; charset=utf-8' };
 
 function send(res, status, body, type = 'application/json; charset=utf-8', headers = {}) {
   res.writeHead(status, { 'Content-Type': type, 'X-Content-Type-Options': 'nosniff', 'Cache-Control': 'no-store', ...headers });
@@ -381,6 +383,7 @@ function resolvePath(pathname) {
   const requested = decoded === '/' ? '/index.html' : decoded;
   if (requested.split('/').some((part) => part.startsWith('.'))) return null;
   const publicFile = ['/index.html', '/goal-data.js', '/service-worker.js', '/manifest.json'].includes(requested)
+    || /^\/assets\/fonts\/(?:Golos-Text|Oswald|IBM-Plex-Mono)-OFL\.txt$/.test(requested)
     || /^\/(?:assets|previews)\/.+\.(?:css|js|png|jpe?g|webp|avif|gif|svg|ico|woff2?|ttf|otf)$/i.test(requested);
   if (!publicFile) return null;
   const file = path.resolve(ROOT, `.${requested}`);
@@ -961,8 +964,25 @@ function rosterMapForFixture(players, fixture) {
 }
 
 const server = http.createServer(async (req, res) => {
-  const url = new URL(req.url || '/', `http://${req.headers.host || 'localhost'}`);
-  if (req.method !== 'GET') return send(res, 405, { error: 'Method not allowed' });
+  res.setHeader('X-Content-Type-Options', 'nosniff');
+  res.setHeader('Referrer-Policy', 'no-referrer');
+  res.setHeader('X-Frame-Options', 'DENY');
+  res.setHeader('Permissions-Policy', 'camera=(), microphone=(), geolocation=(), payment=(), usb=()');
+  // The existing application uses inline scripts/styles and image handlers.
+  res.setHeader('Content-Security-Policy', "default-src 'self'; script-src 'self' 'unsafe-inline'; style-src 'self' 'unsafe-inline'; img-src 'self' https: data:; font-src 'self'; connect-src 'self'; worker-src 'self'; manifest-src 'self'; object-src 'none'; frame-src 'none'; frame-ancestors 'none'; base-uri 'self'; form-action 'none'");
+  if (releaseIssues(release).length) res.setHeader('X-Robots-Tag', 'noindex, nofollow');
+  let url;
+  try { url = new URL(req.url || '/', 'http://localhost'); }
+  catch { return send(res, 400, { error: 'Bad request' }); }
+  if (!['GET', 'HEAD'].includes(req.method)) return send(res, 405, { error: 'Method not allowed' }, undefined, { Allow: 'GET, HEAD' });
+  if (legalRoutes.includes(url.pathname)) return send(res, 200, renderLegalPage(url.pathname, release), 'text/html; charset=utf-8', { 'Cache-Control': 'no-cache' });
+  if (url.pathname === '/healthz') return send(res, 200, { status: 'ok', version: release.version });
+  if (url.pathname === '/robots.txt') return send(res, 200, releaseIssues(release).length ? 'User-agent: *\nDisallow: /\n' : `User-agent: *\nAllow: /\nDisallow: /api/\nSitemap: ${release.publicUrl}/sitemap.xml\n`, 'text/plain; charset=utf-8');
+  if (url.pathname === '/sitemap.xml') {
+    if (releaseIssues(release).length) return send(res, 404, { error: 'Public release is not configured' });
+    const locations = ['/', ...legalRoutes].map(route => `<url><loc>${release.publicUrl}${route}</loc></url>`).join('');
+    return send(res, 200, `<?xml version="1.0" encoding="UTF-8"?><urlset xmlns="http://www.sitemaps.org/schemas/sitemap/0.9">${locations}</urlset>`, 'application/xml; charset=utf-8');
+  }
   if (url.pathname === '/api/status') return send(res, 200, {
     configured: Boolean(FLASHSCORE_ENABLED || GOAL_API_KEY), provider: FLASHSCORE_ENABLED ? 'Flashscore' : 'GOAL API',
     fallbackProvider: GOAL_API_KEY ? 'GOAL API' : '', goalApiConfigured: Boolean(GOAL_API_KEY), flashscoreProxyEnabled: FLASHSCORE_ENABLED, leagueId: LEAGUE_ID,
@@ -1164,8 +1184,8 @@ const server = http.createServer(async (req, res) => {
 });
 startFlashscoreProxy();
 server.on('close', stopFlashscoreProxy);
-server.listen(PORT, '0.0.0.0', () => {
-  console.log(`ТЕМП is running on http://0.0.0.0:${PORT}`);
+server.listen(PORT, process.env.HOST || '0.0.0.0', () => {
+  console.log(`КРОМКА ${release.version} is running on http://0.0.0.0:${PORT}`);
   console.log(`Flashscore proxy: ${FLASHSCORE_ENABLED ? 'enabled' : 'disabled'}`);
   console.log(`GOAL API fallback/supplement: ${GOAL_API_KEY ? 'configured (key hidden)' : 'not configured'}`);
   console.log(`API-Football portrait fallback: ${API_FOOTBALL_API_KEY ? 'configured (key hidden)' : 'not configured'}`);

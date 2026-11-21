@@ -1,11 +1,13 @@
 {
-  "name": "temp-rpl-mvp",
-  "version": "0.1.1",
+  "name": "kromka",
+  "version": "0.2.0",
   "private": true,
   "type": "module",
   "scripts": {
     "start": "node server.mjs",
-    "check": "node --check server.mjs && node --check flashscore-adapter.mjs && node --check goal-data.js && node --check assets/goal-insights.js && node --check assets/season-analytics.js && node --check assets/stat-charts.js && node --check assets/match-presentation.js && node --check assets/match-chronology.js && node --check assets/lineup-layout.js && node --check assets/ui-polish.js && node --check assets/detail-screens.js && node --check assets/concept-views.js && node --check service-worker.js",
-    "test": "node --test tests/*.test.mjs"
-  }
+    "check": "node --check server.mjs && node --check release-config.mjs && node --check legal-pages.mjs && node --check scripts/release-check.mjs && node --check flashscore-adapter.mjs && node --check goal-data.js && node --check assets/goal-insights.js && node --check assets/season-analytics.js && node --check assets/stat-charts.js && node --check assets/match-presentation.js && node --check assets/match-chronology.js && node --check assets/lineup-layout.js && node --check assets/ui-polish.js && node --check assets/detail-screens.js && node --check assets/concept-views.js && node --check assets/storage-controls.js && node --check service-worker.js",
+    "test": "node --test tests/*.test.mjs",
+    "release:check": "node scripts/release-check.mjs"
+  },
+  "engines": { "node": ">=22" }
 }

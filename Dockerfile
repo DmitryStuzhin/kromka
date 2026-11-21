@@ -10,7 +10,7 @@ ENV NODE_ENV=production \
 WORKDIR /app
 
 # Copy only runtime files. Provider credentials are injected at runtime.
-COPY --chown=node:node package.json server.mjs flashscore-adapter.mjs flashscore_proxy.py ./
+COPY --chown=node:node package.json server.mjs release-config.mjs legal-pages.mjs flashscore-adapter.mjs flashscore_proxy.py ./
 COPY --chown=node:node index.html goal-data.js service-worker.js manifest.json ./
 COPY --chown=node:node assets ./assets
 RUN mkdir -p /app/.cache && chown node:node /app/.cache

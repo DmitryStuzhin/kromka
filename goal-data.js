@@ -395,7 +395,7 @@
   function liveOpenMatch(id) {
     const m = matches.find((entry) => String(entry.id) === String(id)); if (!m) return; modalMatch = m;
     const h = clubs[m.home], a = clubs[m.away]; if (!h || !a) return;
-    const events = m.events.length ? m.events.map((e) => `<div class="event-row"><span class="event-time">${safe(e[0])}</span><span class="event-main">${safe(e[1])}</span><span class="event-side">${safe(e[2])}</span></div>`).join('') : '<div class="empty-note">События для этого матча не пришли в ответе поставщика.</div>';
+    const events = m.events.length ? m.events.map((e) => `<div class="event-row"><span class="event-time">${safe(e[0])}</span><span class="event-main">${safe(e[1])}</span><span class="event-side">${safe(e[2])}</span></div>`).join('') : '<div class="empty-note">События этого матча пока недоступны.</div>';
     const stats = m.stats.length ? m.stats.map((s) => {
       const homeValue = Number.isFinite(Number(s[3])) ? Number(s[3]) : Number(s[1]) || 0;
       const awayValue = Number.isFinite(Number(s[4])) ? Number(s[4]) : Number(s[2]) || 0;
@@ -470,6 +470,6 @@
     if (seasonLabel && /^\d{4}$/.test(String(window.rplSeason))) seasonLabel.textContent = `РПЛ · ${window.rplSeason}/${String(Number(window.rplSeason) + 1).slice(-2)}`;
     return refresh({ quiet: true }).catch((error) => { console.warn('RPL data providers unavailable; retaining explicit demo view', error); setDataRibbon(true); render(); });
   }).catch(() => setDataRibbon()).finally(() => { if (!refreshPending) setRefreshBusy(false); });
-  setInterval(() => { if (window.isLiveData && document.visibilityState === 'visible') refresh({ quiet: true }).catch((e) => console.warn('GOAL API refresh failed', e)); }, 30 * 1000);
+  setInterval(() => { if (window.isLiveData && document.visibilityState === 'visible') refresh({ quiet: true }).catch(() => console.warn('Не удалось обновить данные матчей')); }, 30 * 1000);
   if ('serviceWorker' in navigator) navigator.serviceWorker.register('/service-worker.js').catch((e) => console.warn('PWA worker unavailable', e));
 })();
