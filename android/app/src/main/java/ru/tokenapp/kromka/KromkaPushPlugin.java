@@ -18,7 +18,7 @@ public class KromkaPushPlugin extends Plugin {
     private void resolve(PluginCall call) {
         try {
             JSObject value = new JSObject(state().publicState().toString());
-            value.put("permission", NotificationManagerCompat.from(getContext()).areNotificationsEnabled()); call.resolve(value);
+            value.put("permission", KromkaMessagingService.allowed(getContext())); call.resolve(value);
         } catch(Exception e) { call.reject("Не удалось прочитать настройки"); }
     }
     @PluginMethod public void getState(PluginCall call) { resolve(call); }
@@ -37,7 +37,7 @@ public class KromkaPushPlugin extends Plugin {
         finishEnable(call);
     }
     private void finishEnable(PluginCall call) {
-        if(!NotificationManagerCompat.from(getContext()).areNotificationsEnabled()) { call.reject("Разрешите уведомления в настройках Android"); return; }
+        if(!KromkaMessagingService.allowed(getContext())) { call.reject("Разрешите уведомления в настройках Android"); return; }
         try {
             state().enable(call.getArray("fixtureIds"), call.getArray("teamIds"), call.getArray("kinds"));
             ((KromkaApplication)getActivity().getApplication()).startPush();
@@ -51,10 +51,16 @@ public class KromkaPushPlugin extends Plugin {
             PushSyncWorker.resume(getContext()); resolve(call);
         } catch(Exception e) { call.reject("Не удалось сохранить выбор"); }
     }
-    @PluginMethod public void disable(PluginCall call) {
+    @PluginMethod public void disable(PluginCall call) { disable(call, false); }
+    @PluginMethod public void clearData(PluginCall call) { disable(call, true); }
+    private void disable(PluginCall call, boolean clearData) {
         state().disable();
+        if(clearData) synchronized(PushState.LOCK) { state().prefs.edit().remove("fixtures").remove("teams").remove("kinds").remove("seen").commit(); }
         ((KromkaApplication)getActivity().getApplication()).components(false);
         NotificationManagerCompat.from(getContext()).cancelAll();
+        if(RuStorePushClient.INSTANCE.isInitialized()) {
+            try { RuStorePushClient.INSTANCE.deleteToken().addOnFailureListener(error -> {}); } catch(Exception ignored) {}
+        }
         PushSyncWorker.resume(getContext()); resolve(call);
     }
     @PluginMethod public void openSettings(PluginCall call) {

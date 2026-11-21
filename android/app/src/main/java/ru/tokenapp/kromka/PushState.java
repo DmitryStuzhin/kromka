@@ -51,7 +51,9 @@ final class PushState {
     void selection(JSONArray fixtures, JSONArray teams, JSONArray kinds) throws JSONException {
         String f = clean(fixtures, false).toString(), t = clean(teams, false).toString(), k = clean(kinds, true).toString();
         synchronized (LOCK) {
-            if (f.equals(prefs.getString("fixtures", "[]")) && t.equals(prefs.getString("teams", "[]")) && k.equals(prefs.getString("kinds", DEFAULT_KINDS))) return;
+            boolean same = f.equals(prefs.getString("fixtures", "[]")) && t.equals(prefs.getString("teams", "[]")) && k.equals(prefs.getString("kinds", DEFAULT_KINDS));
+            boolean heartbeat = enabled() && !prefs.getBoolean("pending", false) && System.currentTimeMillis()-prefs.getLong("syncedAt", 0)>86400_000L;
+            if (same && !heartbeat) return;
             SharedPreferences.Editor edit = prefs.edit().putString("fixtures", f).putString("teams", t).putString("kinds", k);
             if (enabled()) changed(edit, "pending"); else edit.commit();
         }

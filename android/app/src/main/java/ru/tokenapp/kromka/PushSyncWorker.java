@@ -53,7 +53,7 @@ public final class PushSyncWorker extends Worker {
                     generation = state.prefs.getLong("generation", 0); enabled = state.enabled();
                     id = state.prefs.getString("id", ""); secret = state.prefs.getString("secret", "");
                     String token = state.prefs.getString("token", "");
-                    if (enabled && token.isEmpty()) return Result.retry();
+                    if (enabled && token.isEmpty()) return Result.success(); // token callback schedules the actual upload
                     JSONObject payload = new JSONObject().put("token", token).put("consent", PushState.CONSENT)
                         .put("fixtureIds", PushState.array(state.prefs.getString("fixtures", "[]")))
                         .put("teamIds", PushState.array(state.prefs.getString("teams", "[]")))
@@ -74,7 +74,10 @@ public final class PushSyncWorker extends Worker {
                 synchronized (PushState.LOCK) {
                     if (generation != state.prefs.getLong("generation", 0)) return Result.success();
                     if (code>=200 && code<300) {
-                        state.prefs.edit().putBoolean("pending", false).putString("status", enabled ? "on" : "off").commit();
+                        android.content.SharedPreferences.Editor edit = state.prefs.edit().putBoolean("pending", false).putString("status", enabled ? "on" : "off");
+                        if(!enabled) edit.remove("id").remove("secret");
+                        else edit.putLong("syncedAt", System.currentTimeMillis());
+                        edit.commit();
                         return Result.success();
                     }
                     if(code==429 || code>=500) { state.prefs.edit().putString("status", enabled ? "pending" : "revoking").commit(); return Result.retry(); }

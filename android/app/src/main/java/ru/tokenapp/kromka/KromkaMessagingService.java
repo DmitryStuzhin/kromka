@@ -13,6 +13,14 @@ import ru.rustore.sdk.pushclient.messaging.service.RuStoreMessagingService;
 import ru.rustore.sdk.pushclient.messaging.model.RemoteMessage;
 
 public class KromkaMessagingService extends RuStoreMessagingService {
+    static boolean allowed(Context context) {
+        if(!NotificationManagerCompat.from(context).areNotificationsEnabled()) return false;
+        if(android.os.Build.VERSION.SDK_INT>=26) {
+            NotificationChannel channel=context.getSystemService(NotificationManager.class).getNotificationChannel("matches");
+            if(channel!=null && channel.getImportance()==NotificationManager.IMPORTANCE_NONE) return false;
+        }
+        return true;
+    }
     @Override public void onNewToken(String token) {
         new PushState(this).token(token); PushSyncWorker.resume(this);
     }
@@ -23,7 +31,7 @@ public class KromkaMessagingService extends RuStoreMessagingService {
         if(event==null || !event.matches("[a-f0-9]{64}") || fixture==null || !fixture.matches("[A-Za-z0-9_-]{1,64}") || kind==null || !kind.matches("goal|lineups|start|finish")
             || title==null || title.isEmpty() || title.length()>100 || body==null || body.length()>300) return false;
         synchronized (PushState.LOCK) {
-            if(!state.enabled() || state.seen(event) || !NotificationManagerCompat.from(context).areNotificationsEnabled()) return false;
+            if(!state.enabled() || state.seen(event) || !allowed(context)) return false;
             boolean wanted = false;
             org.json.JSONArray kinds = PushState.array(state.prefs.getString("kinds", PushState.DEFAULT_KINDS));
             for(int i=0;i<kinds.length();i++) if(kind.equals(kinds.optString(i))) wanted=true;

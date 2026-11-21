@@ -12,10 +12,10 @@ export async function syncPushSelection() {
       const state = await Push.getState();
       await Push.setSelection({ fixtureIds: selection.fixtureIds, teamIds: selection.teamIds, kinds: state.kinds });
     } while(dirty);
-  } catch { /* A later selection/data-ready event retries, without exposing credentials. */ }
+  } catch { window.showToast?.('Не удалось обновить подписку. Для уведомлений можно выбрать до 100 матчей и 100 клубов.'); }
   finally { syncing = false; }
 }
-window.kromkaClearPushData = () => Push.disable();
+window.kromkaClearPushData = () => Push.clearData();
 export function installPushSettings() {
   const section = document.getElementById('notifications');
   if (!section) return;

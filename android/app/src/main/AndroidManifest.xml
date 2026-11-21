@@ -28,6 +28,7 @@
 
         <!-- Manual initialization after consent; never initialize from a provider. -->
         <provider android:name="ru.rustore.sdk.pushclient.provider.RuStorePushClientInitProvider" tools:node="remove" />
+        <provider android:name="com.vk.push.core.deviceid.contentprovider.VkpnsDeviceIdContentProvider" android:enabled="false" tools:replace="android:enabled" />
         <receiver android:name="ru.rustore.sdk.pushclient.internal.arbiter.ArbiterBroadcastReceiver" android:enabled="false" tools:replace="android:enabled" />
         <service android:name=".KromkaMessagingService" android:enabled="false" android:exported="true">
             <intent-filter><action android:name="ru.rustore.sdk.pushclient.MESSAGING_EVENT" /></intent-filter>

@@ -10,12 +10,13 @@ public class KromkaApplication extends Application {
     static boolean configured() { return !BuildConfig.RUSTORE_PROJECT_ID.isEmpty(); }
     @Override public void onCreate() {
         super.onCreate();
+        components(configured() && new PushState(this).enabled());
         if (configured() && new PushState(this).enabled()) startPush();
         PushSyncWorker.resume(this);
     }
     void components(boolean enabled) {
         int value = enabled ? PackageManager.COMPONENT_ENABLED_STATE_ENABLED : PackageManager.COMPONENT_ENABLED_STATE_DISABLED;
-        for (String name : new String[]{getPackageName()+".KromkaMessagingService", "ru.rustore.sdk.pushclient.internal.arbiter.ArbiterBroadcastReceiver"})
+        for (String name : new String[]{getPackageName()+".KromkaMessagingService", "ru.rustore.sdk.pushclient.internal.arbiter.ArbiterBroadcastReceiver", "com.vk.push.core.deviceid.contentprovider.VkpnsDeviceIdContentProvider"})
             getPackageManager().setComponentEnabledSetting(new ComponentName(this, name), value, PackageManager.DONT_KILL_APP);
     }
     void startPush() {

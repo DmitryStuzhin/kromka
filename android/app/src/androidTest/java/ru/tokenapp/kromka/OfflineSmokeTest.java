@@ -73,6 +73,7 @@ public class OfflineSmokeTest {
             assertEquals("true", js("window.kromkaOpenPushMatch('smoke1')"));
             until("document.querySelector('#screen [data-detail-back]') !== null");
             androidx.test.espresso.Espresso.pressBack();
+            until("document.querySelector('#screen [data-detail-back]') === null");
             InstrumentationRegistry.getInstrumentation().runOnMainSync(() -> activity.startActivity(
                 new android.content.Intent(activity, MainActivity.class).setAction(android.content.Intent.ACTION_VIEW)
                     .setData(android.net.Uri.parse("ru.tokenapp.kromka://match/smoke1"))

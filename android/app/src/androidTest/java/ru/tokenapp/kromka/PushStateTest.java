@@ -32,6 +32,13 @@ public class PushStateTest {
             assertEquals(version+1, state.prefs.getLong("generation", 0));
             assertEquals(id, state.prefs.getString("id", "")); assertEquals(secret, state.prefs.getString("secret", ""));
             assertEquals("rotated-device-token-123456789", new PushState(context).prefs.getString("token", ""));
+            state.prefs.edit().putBoolean("pending", false).putLong("syncedAt", System.currentTimeMillis()).commit();
+            version = state.prefs.getLong("generation", 0);
+            state.selection(new JSONArray("[\"m1\"]"), new JSONArray("[\"t1\"]"), new JSONArray("[\"goal\"]"));
+            assertEquals(version, state.prefs.getLong("generation", 0));
+            state.prefs.edit().putLong("syncedAt", System.currentTimeMillis()-2*86400_000L).commit();
+            state.selection(new JSONArray("[\"m1\"]"), new JSONArray("[\"t1\"]"), new JSONArray("[\"goal\"]"));
+            assertEquals(version+1, state.prefs.getLong("generation", 0));
 
             try(android.os.ParcelFileDescriptor fd = InstrumentationRegistry.getInstrumentation().getUiAutomation()
                 .executeShellCommand("pm grant "+context.getPackageName()+" android.permission.POST_NOTIFICATIONS")) {

@@ -16,9 +16,10 @@ let pendingMatch;
 const openPending = () => { if(pendingMatch && window.kromkaOpenPushMatch?.(pendingMatch)) { pendingMatch=null; sessionStorage.removeItem('kromka:push-match'); } };
 const receiveLink = value => {
   try {
-    const url = new URL(value);
-    if(url.protocol !== 'ru.tokenapp.kromka:' || url.hostname !== 'match' || !/^\/[A-Za-z0-9_-]{1,64}$/.test(url.pathname) || url.search || url.hash) return;
-    pendingMatch = url.pathname.slice(1); sessionStorage.setItem('kromka:push-match', pendingMatch);
+    const match = typeof value === 'string' && /^ru\.tokenapp\.kromka:\/\/match\/([A-Za-z0-9_-]{1,64})$/.exec(value);
+    if(!match) return;
+    console.info('Получена ссылка на матч из уведомления');
+    pendingMatch = match[1]; sessionStorage.setItem('kromka:push-match', pendingMatch);
     if(location.pathname !== '/' && location.pathname !== '/index.html') location.href='/'; else openPending();
   } catch (error) { console.warn('Не удалось открыть матч из уведомления', error?.message); }
 };
