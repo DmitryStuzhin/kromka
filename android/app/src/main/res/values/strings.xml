@@ -1,7 +1,7 @@
 <?xml version='1.0' encoding='utf-8'?>
 <resources>
-    <string name="app_name">КРОМКА</string>
-    <string name="title_activity_main">КРОМКА</string>
+    <string name="app_name">КРОМКА — Российский Футбол</string>
+    <string name="title_activity_main">КРОМКА — Российский Футбол</string>
     <string name="package_name">ru.tokenapp.kromka</string>
     <string name="custom_url_scheme">ru.tokenapp.kromka</string>
 </resources>
