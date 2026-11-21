@@ -340,7 +340,9 @@ button:focus-visible, a:focus-visible, [tabindex]:focus-visible {
   text-align: left;
 }
 .main.concept-table .standings th:nth-child(3) { width: 30px !important; }
-.main.concept-table .standings th:nth-child(4) { width: 0 !important; }
+.main.concept-table .standings th:nth-child(4) { width: 56px !important; }
+.main.concept-table .standings th:nth-child(4),
+.main.concept-table .standings td:nth-child(4) { white-space: nowrap; }
 .main.concept-table .standings th:nth-child(5) { width: 40px !important; }
 .main.concept-table .standings th:nth-child(6) {
   width: 128px !important;
