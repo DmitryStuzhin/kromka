@@ -4,6 +4,10 @@
 
 ## Тестовая Android-сборка
 
+Постоянный сертификат подписи подготовлен. SHA-256: `16:9C:8C:23:E8:0C:C7:FD:EE:98:4B:46:4A:B5:B6:03:1E:7A:65:DD:26:04:A1:28:C0:A3:F1:67:A1:36:87:CD`. Закрытый ключ и пароль находятся вне репозитория; GitHub Actions использует encrypted secrets. Workflow `Signed Android APK` запускается вручную, проверяет совпадение сертификата с `android/release-certificate.sha256` и сохраняет APK, контрольную сумму, manifest и разрешения. Сборка сама не публикует приложение в магазине.
+
+Для этой сборки задаются versionCode, versionName и push project ID (пустое значение оставляет уведомления недоступными). Для следующих публикаций увеличивать versionCode и сохранять тот же ключ. Без signing credentials сборка release завершается ошибкой.
+
 `npm ci && npm run mobile:sync` готовит локальные файлы интерфейса и Android-проект. Сборка: `cd android && ./gradlew assembleDebug` (JDK 21 и Android SDK 36). Workflow `Android APK` выполняет это в GitHub Actions и сохраняет `kromka-debug-apk`. Debug APK подписывается тестовым ключом и не предназначен для публикации в магазине; ключ релизной подписи выбирается отдельно до первого выпуска.
 
 Текущие функции оболочки: локальные файлы интерфейса и документов, запросы только к HTTPS API, сохранение последнего календаря и таблицы с датой обновления, обработка Android Back, открытие внешних HTTPS-ссылок через браузер. Merged manifest содержит INTERNET, POST_NOTIFICATIONS, ACCESS_NETWORK_STATE, RECEIVE_BOOT_COMPLETED, WAKE_LOCK, FOREGROUND_SERVICE и собственное signature-разрешение receiver; резервное копирование Android выключено. Запрос POST_NOTIFICATIONS выполняется только при включении уведомлений. Подключены только App и Browser от Capacitor; SDK уведомлений и аналитики ещё не добавлены. Эти свойства требуют проверки на телефоне, а не только сборки.

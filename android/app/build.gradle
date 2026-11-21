@@ -2,6 +2,10 @@ apply plugin: 'com.android.application'
 
 def pushProject = providers.gradleProperty('rustoreProjectId').orElse(providers.environmentVariable('RUSTORE_PROJECT_ID')).getOrElse('')
 if (pushProject && !(pushProject ==~ /[A-Za-z0-9_-]{3,160}/)) throw new GradleException('Invalid RuStore project ID')
+def releaseCode = providers.environmentVariable('KROMKA_VERSION_CODE').getOrElse('1')
+def releaseName = providers.environmentVariable('KROMKA_VERSION_NAME').getOrElse('0.2.0')
+if (!(releaseCode ==~ /[1-9][0-9]{0,8}/) || !(releaseName ==~ /[0-9]+\.[0-9]+\.[0-9]+/)) throw new GradleException('Invalid Android version')
+def signingPath = providers.environmentVariable('KROMKA_KEYSTORE_PATH').getOrElse('')
 android {
     namespace = "ru.tokenapp.kromka"
     compileSdk = rootProject.ext.compileSdkVersion
@@ -9,8 +13,8 @@ android {
         applicationId "ru.tokenapp.kromka"
         minSdkVersion rootProject.ext.minSdkVersion
         targetSdkVersion rootProject.ext.targetSdkVersion
-        versionCode 1
-        versionName "0.2.0"
+        versionCode Integer.parseInt(releaseCode)
+        versionName releaseName
         buildConfigField 'String', 'RUSTORE_PROJECT_ID', '"' + pushProject + '"'
         testInstrumentationRunner "androidx.test.runner.AndroidJUnitRunner"
         testInstrumentationRunnerArguments additionalTestOutputDir: "/sdcard/Android/media/ru.tokenapp.kromka/smoke-output"
@@ -21,12 +25,29 @@ android {
         }
     }
     buildFeatures { buildConfig true }
+    signingConfigs {
+        release {
+            if(signingPath) {
+                storeFile file(signingPath)
+                storePassword System.getenv('KROMKA_KEYSTORE_PASSWORD')
+                keyAlias System.getenv('KROMKA_KEY_ALIAS')
+                keyPassword System.getenv('KROMKA_KEY_PASSWORD')
+            }
+        }
+    }
     buildTypes {
         release {
+            signingConfig signingConfigs.release
+            debuggable false
             minifyEnabled false
             proguardFiles getDefaultProguardFile('proguard-android.txt'), 'proguard-rules.pro'
         }
     }
+}
+
+gradle.taskGraph.whenReady { graph ->
+    if(graph.allTasks.any { it.project == project && it.name in ['assembleRelease', 'bundleRelease'] } && !signingPath)
+        throw new GradleException('Release signing credentials are required; refusing an unsigned release')
 }
 
 repositories {

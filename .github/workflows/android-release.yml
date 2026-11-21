@@ -1,0 +1,79 @@
+name: Signed Android APK
+on:
+  workflow_dispatch:
+    inputs:
+      version_code:
+        description: 'Android versionCode (increase for every store update)'
+        required: true
+        default: '1'
+      version_name:
+        description: 'Android versionName'
+        required: true
+        default: '0.2.0'
+      rustore_project_id:
+        description: 'Push project ID; leave empty to keep push unavailable'
+        required: false
+        default: ''
+permissions:
+  contents: read
+jobs:
+  release:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    env:
+      KROMKA_VERSION_CODE: ${{ inputs.version_code }}
+      KROMKA_VERSION_NAME: ${{ inputs.version_name }}
+      RUSTORE_PROJECT_ID: ${{ inputs.rustore_project_id }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24
+          cache: npm
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: 21
+      - uses: android-actions/setup-android@v3
+        with:
+          packages: 'platform-tools platforms;android-36 build-tools;36.0.0'
+          log-accepted-android-sdk-licenses: false
+      - run: npm ci && npm run check && npm test && npm run mobile:sync
+      - name: Load private signing key
+        env:
+          KEYSTORE_B64: ${{ secrets.KROMKA_KEYSTORE_B64 }}
+        run: |
+          test -n "$KEYSTORE_B64"
+          umask 077
+          printf '%s' "$KEYSTORE_B64" | base64 --decode > "$RUNNER_TEMP/kromka-release.keystore"
+      - name: Build signed release
+        working-directory: android
+        env:
+          KROMKA_KEYSTORE_PATH: ${{ runner.temp }}/kromka-release.keystore
+          KROMKA_KEYSTORE_PASSWORD: ${{ secrets.KROMKA_KEYSTORE_PASSWORD }}
+          KROMKA_KEY_PASSWORD: ${{ secrets.KROMKA_KEY_PASSWORD }}
+          KROMKA_KEY_ALIAS: ${{ secrets.KROMKA_KEY_ALIAS }}
+        run: |
+          chmod +x gradlew
+          ./gradlew :app:assembleRelease --no-daemon
+      - name: Verify certificate and record checksums
+        run: |
+          mkdir -p release
+          cp android/app/build/outputs/apk/release/app-release.apk release/kromka-release.apk
+          "$ANDROID_HOME/build-tools/36.0.0/apksigner" verify --verbose --print-certs release/kromka-release.apk > release/signature.txt
+          expected="$(tr -d '\r\n' < android/release-certificate.sha256)"
+          grep -Fx "Signer #1 certificate SHA-256 digest: $expected" release/signature.txt
+          "$ANDROID_HOME/build-tools/36.0.0/aapt" dump badging release/kromka-release.apk > release/package.txt
+          "$ANDROID_HOME/build-tools/36.0.0/aapt" dump permissions release/kromka-release.apk > release/permissions.txt
+          "$ANDROID_HOME/build-tools/36.0.0/aapt" dump xmltree release/kromka-release.apk AndroidManifest.xml > release/manifest.txt
+          printf '%s\n' "$GITHUB_SHA" > release/source-commit.txt
+          cd release
+          sha256sum kromka-release.apk > SHA256.txt
+      - uses: actions/upload-artifact@v4
+        with:
+          name: kromka-signed-release
+          path: release/
+          retention-days: 30
+      - name: Remove signing key
+        if: always()
+        run: rm -f "$RUNNER_TEMP/kromka-release.keystore"
