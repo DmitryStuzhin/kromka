@@ -23,6 +23,7 @@
       cancel.disabled = true;
       try {
         if (kind === 'preferences') {
+          await globalThis.kromkaClearPushData?.();
           for (const key of preferenceKeys) localStorage.removeItem(key);
           status.textContent = 'Избранное и любимый клуб удалены из этого браузера. Обновите другие открытые вкладки КРОМКИ.';
         } else {

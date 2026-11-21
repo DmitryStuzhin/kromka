@@ -436,6 +436,7 @@
     window.installDetailedMatchLayer?.();
     startLiveStream();
     setDataRibbon(); render();
+    document.dispatchEvent(new Event('kromka:data-ready'));
   }
   function setRefreshBusy(busy) {
     const button = document.getElementById('refreshBtn');

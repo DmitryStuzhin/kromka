@@ -1,9 +1,32 @@
 import { App } from '@capacitor/app';
 import { Browser } from '@capacitor/browser';
+import { syncPushSelection, installPushSettings } from './push.js';
 
 const API = 'https://tokenapp.ru';
 window.kromkaApiUrl = value => new URL(value, API).href;
 window.kromkaNative = true;
+document.addEventListener('kromka:selection', syncPushSelection);
+document.addEventListener('kromka:data-ready', syncPushSelection);
+document.addEventListener('DOMContentLoaded', () => {
+  installPushSettings(); syncPushSelection();
+  const links = document.querySelector('.app-links');
+  if (links) { const link=document.createElement('a'); link.href='/storage.html#notifications'; link.textContent='Уведомления'; links.append(link); }
+});
+let pendingMatch;
+const openPending = () => { if(pendingMatch && window.kromkaOpenPushMatch?.(pendingMatch)) { pendingMatch=null; sessionStorage.removeItem('kromka:push-match'); } };
+const receiveLink = value => {
+  try {
+    const url = new URL(value);
+    if(url.protocol !== 'ru.tokenapp.kromka:' || url.hostname !== 'match' || !/^\/[A-Za-z0-9_-]{1,64}$/.test(url.pathname) || url.search || url.hash) return;
+    pendingMatch = url.pathname.slice(1); sessionStorage.setItem('kromka:push-match', pendingMatch);
+    if(location.pathname !== '/' && location.pathname !== '/index.html') location.href='/'; else openPending();
+  } catch {}
+};
+pendingMatch = sessionStorage.getItem('kromka:push-match');
+App.getLaunchUrl().then(result=>{if(result?.url) receiveLink(result.url);}).catch(()=>{});
+App.addListener('appUrlOpen', event=>receiveLink(event.url));
+document.addEventListener('kromka:data-ready', openPending);
+document.addEventListener('DOMContentLoaded', openPending);
 document.addEventListener('click', async event => {
   const link = event.target.closest('a[href]');
   if (!link) return;

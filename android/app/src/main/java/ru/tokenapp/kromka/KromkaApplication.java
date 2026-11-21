@@ -24,7 +24,9 @@ public class KromkaApplication extends Application {
         if (!RuStorePushClient.INSTANCE.isInitialized()) RuStorePushClient.INSTANCE.init(this, BuildConfig.RUSTORE_PROJECT_ID, new QuietLogger());
         RuStorePushClient.INSTANCE.getToken().addOnSuccessListener(token -> {
             new PushState(this).token(token); PushSyncWorker.resume(this);
-        }).addOnFailureListener(error -> new PushState(this).prefs.edit().putString("status", "token-error").commit());
+        }).addOnFailureListener(error -> {
+            synchronized(PushState.LOCK) { PushState state = new PushState(this); if(state.enabled()) state.prefs.edit().putString("status", "token-error").commit(); }
+        });
     }
     // SDK diagnostics may include credentials; never route them to logcat.
     private static final class QuietLogger implements Logger {

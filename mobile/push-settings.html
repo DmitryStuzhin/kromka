@@ -1,0 +1,16 @@
+<section id="notifications" aria-labelledby="notifications-title">
+  <h2 id="notifications-title">Уведомления о матчах</h2>
+  <p>Для клубов и матчей из избранного. Доставка зависит от сети, настроек Android и появления данных о матче.</p>
+  <p id="push-state" role="status" aria-live="polite">Проверяем настройки…</p>
+  <p id="push-selection"></p>
+  <fieldset class="push-kinds"><legend>Какие события сообщать</legend>
+    <label><input type="checkbox" value="goal"> Голы и текущий счёт</label>
+    <label><input type="checkbox" value="lineups"> Официальные составы</label>
+    <label><input type="checkbox" value="start"> Начало матча</label>
+    <label><input type="checkbox" value="finish"> Завершение матча</label>
+  </fieldset>
+  <p>Нажимая «Включить уведомления», вы соглашаетесь передать КРОМКЕ токен уведомлений, случайный ID установки, выбранные клубы, матчи и виды событий для доставки уведомлений через RuStore. Подробнее — в <a href="/privacy.html#push">политике конфиденциальности</a>. Отключить можно здесь в любой момент.</p>
+  <div class="legal-actions"><button id="push-toggle" class="legal-button" type="button" disabled>Включить уведомления</button><button id="push-system" class="legal-button is-secondary" type="button" hidden>Настройки Android</button></div>
+  <p id="push-error" role="alert"></p>
+  <p><a href="/">Выбрать клубы и матчи в избранном</a></p>
+</section>

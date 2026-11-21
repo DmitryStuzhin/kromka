@@ -113,7 +113,7 @@ function weekControls(){return `<div class="week-controls" role="group" aria-lab
 setCalendarWeek(weekStart,selectedDate);
 let tab='today', selectedClub='', filterClub='all', round=13, modalMatch=null, clubSection='обзор', matchScope='all', compareLeft='', compareRight='';
 const readSet=(key,legacyKey)=>{try{const value=JSON.parse(localStorage.getItem(key)??(legacyKey?localStorage.getItem(legacyKey):null)??'[]');return new Set(Array.isArray(value)?value:[])}catch{return new Set()}};
-const persistSet=(key,value)=>{try{localStorage.setItem(key,JSON.stringify([...value]))}catch{}};
+const persistSet=(key,value)=>{try{localStorage.setItem(key,JSON.stringify([...value]))}catch{};globalThis.document?.dispatchEvent(new Event('kromka:selection'))};
 let favorites=readSet('temp-rpl:favorite-clubs','temp-rpl-favorites');
 let favoriteMatches=readSet('temp-rpl:favorite-matches');
 let preferredClub='';
@@ -353,6 +353,8 @@ document.addEventListener('keydown',e=>{
   if(!sheet.contains(document.activeElement)||(e.shiftKey?document.activeElement===first:document.activeElement===last)){e.preventDefault();(e.shiftKey?last:first).focus()}
 });
 document.getElementById('searchBtn').addEventListener('click',()=>openSearch());document.getElementById('refreshBtn').addEventListener('click',()=>window.refreshGoalData?.());function showToast(msg){toast.textContent=msg;toast.classList.add('show');clearTimeout(window.toastTimer);window.toastTimer=setTimeout(()=>toast.classList.remove('show'),1900)}
+window.kromkaPushSelection=()=>({ready:!!window.isLiveData,fixtureIds:[...favoriteMatches].map(String),teamIds:[...favorites].map(key=>clubs[key]?.apiId).filter(Boolean).map(String)});
+window.kromkaOpenPushMatch=id=>{if(!window.isLiveData||!matches.some(match=>String(match.id)===String(id)))return false;(window.openMatch||openMatch)(id);return true};
 render();
 </script>
 </body>

@@ -68,11 +68,22 @@ public class OfflineSmokeTest {
             js("document.querySelector('.nav-item[data-tab=table]').click()");
             until("document.querySelector('#screen').innerText.includes('Зенит') && document.querySelector('#screen').innerText.includes('31')");
             screenshot("smoke-saved-table.png");
+            assertEquals("false", js("window.kromkaOpenPushMatch('unknown-match')"));
+            InstrumentationRegistry.getInstrumentation().runOnMainSync(() -> activity.startActivity(
+                new android.content.Intent(activity, MainActivity.class).setAction(android.content.Intent.ACTION_VIEW)
+                    .setData(android.net.Uri.parse("ru.tokenapp.kromka://match/smoke1"))
+                    .addFlags(android.content.Intent.FLAG_ACTIVITY_SINGLE_TOP)));
+            until("document.querySelector('#screen [data-detail-back]') !== null");
+            androidx.test.espresso.Espresso.pressBack();
 
             js("location.href='/privacy.html'");
             until("document.querySelector('h1')?.innerText.toLowerCase().includes('конфиденциальност')");
             assertEquals("true", js("document.querySelector('a[href=\"/storage.html\"]') !== null"));
             screenshot("smoke-privacy.png");
+            js("location.href='/storage.html#notifications'");
+            until("document.querySelector('#push-state')?.innerText.includes('пока недоступны')");
+            assertEquals("true", js("document.querySelector('#push-toggle').disabled"));
+            screenshot("smoke-push-unavailable.png");
             androidx.test.espresso.Espresso.pressBack();
             until("location.pathname==='/' && document.querySelector('.nav-item[data-tab=today]')!==null");
         }

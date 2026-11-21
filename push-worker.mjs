@@ -21,7 +21,7 @@ export async function sendRuStore(job, config, fetcher = fetch) {
     const response = await fetcher(`https://vkpns.rustore.ru/v1/projects/${encodeURIComponent(config.project)}/messages:send`, {
       method: 'POST', headers: { Authorization: `Bearer ${config.serviceToken}`, 'Content-Type': 'application/json' },
       // Native rendering checks local opt-out and eventId before showing anything.
-      body: JSON.stringify({ message: { token: job.token, data: { eventId, fixtureId, kind, title, body }, android: { ttl: `${ttl}s` } } }),
+      body: JSON.stringify({ message: { token: job.token, data: { eventId, fixtureId, kind, title, body, homeTeamId: job.payload.homeTeamId || '', awayTeamId: job.payload.awayTeamId || '' }, android: { ttl: `${ttl}s` } } }),
       signal: AbortSignal.timeout(15000), redirect: 'error'
     });
     if (response.ok) return 'sent';

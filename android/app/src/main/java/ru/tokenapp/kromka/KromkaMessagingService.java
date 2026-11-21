@@ -28,6 +28,11 @@ public class KromkaMessagingService extends RuStoreMessagingService {
             org.json.JSONArray kinds = PushState.array(state.prefs.getString("kinds", PushState.DEFAULT_KINDS));
             for(int i=0;i<kinds.length();i++) if(kind.equals(kinds.optString(i))) wanted=true;
             if(!wanted) return false;
+            boolean selected = false;
+            org.json.JSONArray fixtures = PushState.array(state.prefs.getString("fixtures", "[]")), teams = PushState.array(state.prefs.getString("teams", "[]"));
+            for(int i=0;i<fixtures.length();i++) if(fixture.equals(fixtures.optString(i))) selected=true;
+            for(int i=0;i<teams.length();i++) if(teams.optString(i).equals(data.get("homeTeamId")) || teams.optString(i).equals(data.get("awayTeamId"))) selected=true;
+            if(!selected) return false;
             NotificationManager manager = context.getSystemService(NotificationManager.class);
             if(android.os.Build.VERSION.SDK_INT>=26) {
                 manager.createNotificationChannel(new NotificationChannel("matches", "Матчи и результаты", NotificationManager.IMPORTANCE_DEFAULT));

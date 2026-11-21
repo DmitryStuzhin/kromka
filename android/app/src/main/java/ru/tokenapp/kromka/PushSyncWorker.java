@@ -31,9 +31,12 @@ public final class PushSyncWorker extends Worker {
         try {
             c = connection(API+"status", "GET");
             if (c.getResponseCode()!=200) return false;
-            byte[] bytes = new byte[4096]; int n;
-            try (java.io.InputStream in = c.getInputStream()) { n = in.read(bytes); }
-            JSONObject result = new JSONObject(new String(bytes, 0, Math.max(n,0), StandardCharsets.UTF_8));
+            java.io.ByteArrayOutputStream bytes = new java.io.ByteArrayOutputStream();
+            try (java.io.InputStream in = c.getInputStream()) {
+                byte[] chunk = new byte[512]; int n;
+                while((n=in.read(chunk))!=-1) { if(bytes.size()+n>4096) return false; bytes.write(chunk,0,n); }
+            }
+            JSONObject result = new JSONObject(new String(bytes.toByteArray(), StandardCharsets.UTF_8));
             return result.optBoolean("available") && PushState.CONSENT.equals(result.optString("consent"));
         } catch (Exception e) { return false; } finally { if(c!=null)c.disconnect(); }
     }

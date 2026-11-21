@@ -92,7 +92,7 @@ export class PushStore {
     const id = hash(`${fixture.id}:${kind}:${signature}`);
     const title = { goal: 'Гол', lineups: 'Составы опубликованы', start: 'Матч начался', finish: 'Матч завершён' }[kind];
     const result = fixture.homeScore === null || fixture.awayScore === null ? '' : ` · ${fixture.homeScore}:${fixture.awayScore}`;
-    const payload = { title, body: `${fixture.home} — ${fixture.away}${result}`, fixtureId: fixture.id, eventId: id, kind };
+    const payload = { title, body: `${fixture.home} — ${fixture.away}${result}`, fixtureId: fixture.id, homeTeamId: fixture.homeTeamId, awayTeamId: fixture.awayTeamId, eventId: id, kind };
     const inserted = this.db.prepare('INSERT OR IGNORE INTO events VALUES(?,?,?,?,?,?)').run(id, fixture.id, kind, JSON.stringify(payload), now, now + (kind === 'lineups' ? 30 : 10) * MINUTE);
     if (!inserted.changes) return;
     for (const prefs of this.subscribers()) if (this.matches(prefs, fixture, kind)) this.db.prepare('INSERT OR IGNORE INTO deliveries(event_id,device_id,next_at) VALUES(?,?,?)').run(id, prefs.id, now);

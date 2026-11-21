@@ -43,6 +43,9 @@ public class PushStateTest {
             assertTrue(KromkaMessagingService.display(context, message));
             assertFalse(KromkaMessagingService.display(context, message));
             assertTrue(new PushState(context).seen(message.get("eventId")));
+            state.selection(new JSONArray(), new JSONArray(), new JSONArray("[\"goal\"]"));
+            message.put("eventId", new String(new char[64]).replace('\0', 'c'));
+            assertFalse(KromkaMessagingService.display(context, message)); // locally removed subscriptions
             state.disable();
             assertFalse(state.enabled()); assertFalse(state.prefs.contains("token"));
             assertEquals("revoking", state.publicState().getString("status"));

@@ -41,12 +41,8 @@ public class KromkaPushPlugin extends Plugin {
         try {
             state().enable(call.getArray("fixtureIds"), call.getArray("teamIds"), call.getArray("kinds"));
             ((KromkaApplication)getActivity().getApplication()).startPush();
-            RuStorePushClient.INSTANCE.getToken().addOnSuccessListener(token -> {
-                state().token(token); PushSyncWorker.resume(getContext()); resolve(call);
-            }).addOnFailureListener(error -> {
-                state().prefs.edit().putString("status", "token-error").commit(); resolve(call);
-            });
             PushSyncWorker.enqueue(getContext());
+            resolve(call);
         } catch(Exception e) { call.reject("Не удалось включить уведомления"); }
     }
     @PluginMethod public void setSelection(PluginCall call) {

@@ -64,7 +64,7 @@ final class PushState {
     }
     void disable() {
         synchronized (LOCK) {
-            if (prefs.contains("id")) changed(prefs.edit().putBoolean("enabled", false).remove("token").remove("seen"), "revoking");
+            if (prefs.contains("id")) changed(prefs.edit().putBoolean("enabled", false).remove("token"), "revoking");
             else prefs.edit().putBoolean("enabled", false).putString("status", "off").commit();
         }
     }
