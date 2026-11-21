@@ -35,6 +35,8 @@ public class OfflineSmokeTest {
             + "; navigation=" + js("JSON.stringify({url:location.href,pending:sessionStorage.getItem('kromka:push-match'),live:window.isLiveData,layer:window.openMatch?.__detailedMatchLayer})"));
     }
     private void screenshot(String filename) throws Exception {
+        // DOM assertions can finish before WebView submits the painted frame.
+        SystemClock.sleep(500);
         InstrumentationRegistry.getInstrumentation().waitForIdleSync();
         Bitmap bitmap = InstrumentationRegistry.getInstrumentation().getUiAutomation().takeScreenshot();
         assertNotNull(bitmap);
